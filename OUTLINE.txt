@@ -1,0 +1,8 @@
+-- Uses
+https://docs.pivotal.io/pivotalcf/customizing/cloudform-template.html
+
+as the outline.
+
+1. https://network.pivotal.io/users/dashboard/edit-profile
+   Go here and get the API_Token.  AKA PIVNET_TOKEN 
+2. 
