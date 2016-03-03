@@ -3,6 +3,8 @@ import json
 import os
 import urllib
 from pkg_resources import parse_version
+import sys
+import time
 
 
 class Pivnet(object):
@@ -31,35 +33,74 @@ class Pivnet(object):
         """ https://network.pivotal.io/api/v2/products/elastic-runtime/releases """
         ans = self.get(
             "{}/products/{}/releases".format(self.url_base, product))
-        releases = {parse_version(r['version'])                    : r for r in ans.json()['releases']}
+        releases = {parse_version(r['version']): r for r in ans.json()['releases']}
         vers = releases.keys()
         if include_unreleased is False:
             vers = [v for v in vers if v.is_prerelease == False]
 
+        if version is not None:
+            vers = [v for v in vers if v.base_version.startswith(version)]
+            
         maxver = max(vers)
-
         return releases[maxver]
 
     def productfiles(self, product, releaseNumber):
         return self.get("{}/products/{}/releases/{}/product_files".format(self.url_base, product, releaseNumber)).json()['product_files']
 
+
+    def acceptEULA(self, verDict):
+        # eula acceptance per spec
+        print "Accepting EULA for the relase"
+        resp = self.post(href(verDict, 'eula_acceptance'), allow_redirects=False)
+        if resp.status_code != 200:
+           raise Exception ("Could not auto accept eula" + href(verDict, 'eula_acceptance') + " " +str(resp.headers)) 
+
     """ 'https://network.pivotal.io/api/v2/products/elastic-runtime/releases/1530/product_files/2946/download'
     """
-    def download(self, filedict):
-        filename = os.path.basename(files[0]['aws_object_key'])
+    def download(self, ver, filedict):
+        filename = os.path.basename(filedict['aws_object_key'])
         resp = self.post(href(filedict, 'download'), allow_redirects=False)
+        if resp.status_code == 451:
+            self.acceptEULA(ver)
+            resp = self.post(href(filedict, 'download'), allow_redirects=False)
+
         if resp.status_code != 302:
-            raise Exception("Could not download " + href(filedict))
-
-        return urllib.urlretrieve(resp.headers['location'], filename)
-
+            raise Exception("Could not download " + href(filedict, 'download') + " " +str(resp.headers))
+        
+        start_time = time.time()         
+        class _progress_hook(object):
+            lpr = 10
+            started = False
+            tm = time.time()
+            def __call__(self, nblocks, block_size, size):
+                if self.started is False:
+                    self.started = True
+                    print " size: ", size
+                if (100.0 * nblocks * block_size)/size > self.lpr:
+                    tm_end = time.time() 
+                    print >> sys.stderr, self.lpr," ({} kBps)".format(int((nblocks * block_size)/(1000.0*(tm_end-self.tm)))),
+                    self.lpr += 10
+        print "\nDownloading ", filename, 
+        return urllib.urlretrieve(resp.headers['location'], filename, _progress_hook())
 
 def href(obj, key):
     return obj['_links'][key]['href']
 
 
-piv = Pivnet()
-ver = piv.latest('elastic-runtime')
-files = piv.productfiles('elastic-runtime', ver['id'])
-dn = piv.download(files[0])
-print dn
+
+if __name__ == "__main__":
+
+    piv = Pivnet()
+    ver = piv.latest('elastic-runtime')
+    print "Selected version", ver["version"]
+    files = piv.productfiles('elastic-runtime', ver['id'])
+
+    cloudformation = next((f for f in files if 'cloudformation script for aws' in f['name'].lower()), None)
+    if cloudformation is None:
+        raise Exception ("Could not find link for 'cloudformation script for aws' in "+ver+" "+files)
+
+    er = next((f for f in files if 'PCF Elastic Runtime' == f['name']), None)
+    if er is None:
+        raise Exception ("Could not find link for 'PCF Elastic Runtime' in "+ver+" "+files)
+    dn = piv.download(ver, cloudformation)
+    dn1 = piv.download(ver, er)
