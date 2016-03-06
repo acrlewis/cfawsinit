@@ -1,8 +1,8 @@
 import botocore
 from boto3.session import Session
 import pivnet
-import json
 import uuid
+
 
 def validate_key(ssh_key_name):
     pass
@@ -14,7 +14,6 @@ def deploy(email, ssh_key_name, domain, version=None, create_hosted_zone=False, 
     create zone
     create cert and get arn
     """
-    
     validate_key(ssh_key_name)
 
 """
@@ -33,8 +32,64 @@ def create_stack(key_pair, email, templateFile, cert_arn=None, rds_user="dbadmin
         TemplateBody=open(templateFile, 'rt').read(),
         Tags=tags,
         Parameters=paramaters,
-        Capabilities=['CAPABILITY_IAM']) 
- 
+        Capabilities=['CAPABILITY_IAM'])
+
+def launch_ops_man(stack_name, ops_man_version=None):
+    """
+    launch an ops manager AMI based on the given stack
+    if version is not specified latest is used.
+    """
+    ec2conn = ec2(None, 'us-east-1')
+    piv = pivnet.Pivnet()
+    ver = piv.latest('ops-manager', ops_man_version)
+    ami_name = "pivotal-ops-manager-v"+ver['version']
+    amis = list(ec2conn.images.filter(Owners=['364390758643'],
+        Filters=[{'Name':'name', 'Values': [ami_name]}]))
+
+    if len(amis) == 0:
+        raise Exception("unable to find ami for "+ami_name)
+
+    ami = amis[0]
+
+    print "Selected", ami.image_id, ami.name
+
+    st = get_stack(stack_name)
+
+    ops = {v['OutputKey']: v['OutputValue'] for v in st.outputs}
+    inst = ec2conn.create_instances(ImageId=ami.id,
+            MinCount=1,
+            MaxCount=1,
+            KeyName=ops['PcfKeyPairName'],
+            #SecurityGroupIds=[ops['PcfOpsManagerSecurityGroupId']],
+            InstanceType='m3.large',
+            # SubnetId=ops['PcfPublicSubnetId'],
+            NetworkInterfaces=[{'DeviceIndex':0,
+                'SubnetId': ops['PcfPublicSubnetId'],
+                'Groups': [ops['PcfOpsManagerSecurityGroupId']],
+                'AssociatePublicIpAddress': True}],
+            BlockDeviceMappings=[{"DeviceName": "/dev/sda1",
+                "Ebs": {"VolumeSize": 100,
+                    "VolumeType": "gp2"
+                    }
+                }]
+            )
+    inst.wait_until_exists()
+    inst.create_tags(Tags=[{'Key':'Name', 'Value': 'Ops Manager '+stack_name}])
+    return inst
+
+
+def get_stack(stackName):
+    cff = cloudformation(None, 'us-east-1')
+    stt = list(cff.stacks.filter(StackName=stackName))
+    if len(stt) == 0:
+        raise Exception("Could not find stack with name "+stackName)
+
+    st = stt[0]
+    if st.stack_status != 'CREATE_COMPLETE':
+        raise Exception(stackName + " Is not in CREATE_COMPLETE. Is in " + st.stack_status)
+
+    return st
+
 def ec2(profile, region):
     session = Session(profile_name=profile, region_name=region)
     return session.resource('ec2')

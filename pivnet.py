@@ -36,11 +36,10 @@ class Pivnet(object):
         releases = {parse_version(r['version']): r for r in ans.json()['releases']}
         vers = releases.keys()
         if include_unreleased is False:
-            vers = [v for v in vers if v.is_prerelease == False]
+            vers = [v for v in vers if v.is_prerelease is False]
 
         if version is not None:
             vers = [v for v in vers if v.base_version.startswith(version)]
-            
         maxver = max(vers)
         return releases[maxver]
 
@@ -65,9 +64,10 @@ class Pivnet(object):
             resp = self.post(href(filedict, 'download'), allow_redirects=False)
 
         if resp.status_code != 302:
-            raise Exception("Could not download " + href(filedict, 'download') + " " +str(resp.headers))
-        
-        start_time = time.time()         
+            raise Exception("Could not download " +
+                    href(filedict, 'download') + " " 
+                    +str(resp.headers))
+
         class _progress_hook(object):
             lpr = 10
             started = False
@@ -80,12 +80,12 @@ class Pivnet(object):
                     tm_end = time.time() 
                     print >> sys.stderr, self.lpr," ({} kBps)".format(int((nblocks * block_size)/(1000.0*(tm_end-self.tm)))),
                     self.lpr += 10
+
         print "\nDownloading ", filename, 
         return urllib.urlretrieve(resp.headers['location'], filename, _progress_hook())
 
 def href(obj, key):
     return obj['_links'][key]['href']
-
 
 
 if __name__ == "__main__":
@@ -102,5 +102,5 @@ if __name__ == "__main__":
     er = next((f for f in files if 'PCF Elastic Runtime' == f['name']), None)
     if er is None:
         raise Exception ("Could not find link for 'PCF Elastic Runtime' in "+ver+" "+files)
-    dn = piv.download(ver, cloudformation)
-    dn1 = piv.download(ver, er)
+    #dn = piv.download(ver, cloudformation)
+    #dn1 = piv.download(ver, er)
