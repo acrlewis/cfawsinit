@@ -1,1 +1,4 @@
 boto3
+pyyaml
+robobrowser
+bs4
