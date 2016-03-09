@@ -1,0 +1,14 @@
+---
+region: us-east-1
+email: mjog@gmail.com
+ssh_private_key_path: ~/.ssh/id_rsa
+ssh_key_name: mjog
+domain: "{ssh_key_name}{random}.pcf-practice.com"
+PIVNET_TOKEN: iaaaabbbbcdd-FFX
+ops-manager:
+    version: 1.6.11.0
+    beta-ok: false
+elastic-runtime:
+    version: latest
+    beta-ok: false
+ssl_cert_arn: arn:aws:iam::375783000519:server-certificate/mjogCertificate
