@@ -1,5 +1,4 @@
 import requests
-import json
 import os
 import urllib
 from pkg_resources import parse_version
@@ -30,21 +29,34 @@ class Pivnet(object):
         return requests.post(url, headers=self.auth_header, **kwargs)
 
     def latest(self, product, include_unreleased=False, version=None):
-        """ https://network.pivotal.io/api/v2/products/elastic-runtime/releases """
+        """ https://network.pivotal.io
+            /api/v2/products/elastic-runtime/releases
+        """
+        if version is not None and version.lower() == 'latest':
+            version = None
+
         ans = self.get(
             "{}/products/{}/releases".format(self.url_base, product))
-        releases = {parse_version(r['version']): r for r in ans.json()['releases']}
+        releases = {parse_version(r['version']): r
+                    for r in ans.json()['releases']}
         vers = releases.keys()
         if include_unreleased is False:
             vers = [v for v in vers if v.is_prerelease is False]
 
         if version is not None:
             vers = [v for v in vers if v.base_version.startswith(version)]
+
+        if len(vers) == 0:
+            raise Exception("No version matched product={},"
+                            "v={}, {}".format(
+                                product, version, releases.keys()))
+
         maxver = max(vers)
         return releases[maxver]
 
     def productfiles(self, product, releaseNumber):
-        return self.get("{}/products/{}/releases/{}/product_files".format(self.url_base, product, releaseNumber)).json()['product_files']
+        return self.get("{}/products/{}/releases/{}/product_files".format(
+            self.url_base, product, releaseNumber)).json()['product_files']
 
 
     def acceptEULA(self, verDict):
@@ -56,8 +68,8 @@ class Pivnet(object):
 
     """ 'https://network.pivotal.io/api/v2/products/elastic-runtime/releases/1530/product_files/2946/download'
     """
-    def download(self, ver, filedict):
-        filename = os.path.basename(filedict['aws_object_key'])
+    def download(self, ver, filedict, filename=None):
+        filename = filename or os.path.basename(filedict['aws_object_key'])
         resp = self.post(href(filedict, 'download'), allow_redirects=False)
         if resp.status_code == 451:
             self.acceptEULA(ver)
@@ -72,6 +84,7 @@ class Pivnet(object):
             lpr = 10
             started = False
             tm = time.time()
+
             def __call__(self, nblocks, block_size, size):
                 if self.started is False:
                     self.started = True
@@ -81,8 +94,9 @@ class Pivnet(object):
                     print >> sys.stderr, self.lpr," ({} kBps)".format(int((nblocks * block_size)/(1000.0*(tm_end-self.tm)))),
                     self.lpr += 10
 
-        print "\nDownloading ", filename, 
-        return urllib.urlretrieve(resp.headers['location'], filename, _progress_hook())
+        print "\nDownloading ", filename,
+        return filename, urllib.urlretrieve(resp.headers['location'], filename, _progress_hook())
+
 
 def href(obj, key):
     return obj['_links'][key]['href']
