@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from robobrowser import RoboBrowser
 from robobrowser import forms
 import yaml
+import requests
 
 
 class OpsManApi(object):
@@ -19,6 +20,28 @@ class OpsManApi(object):
         else:
             self.s3_endpoint = "https://s3-{}.amazonaws.com".format(region)
 
+    def setup(self):
+        setup_data = {'setup[eula_accepted]': 'true',
+                      'setup[password]': self.password,
+                      'setup[password_confirmation]': self.password,
+                      'setup[user_name]': self.username}
+        resp = requests.post(
+            self.url + "/api/setup",
+            data=setup_data,
+            verify=False,
+            allow_redirects=False)
+
+        if resp.status_code == 200:
+            print "Admin user established", resp.json()
+        elif resp.status_code == 422:
+            jx = resp.json()
+            if 'errors' in jx:
+                raise Exception("Could not establish user: {}".
+                                format(jx['errors']))
+            else:
+                print "Admin user is already established"
+        return self
+
     def login(self):
         self.browser.open(self.url + "/login", verify=False)
         form = self.browser.get_form(action='/login')
@@ -28,6 +51,7 @@ class OpsManApi(object):
         if self.browser.response.status_code >= 400:
             raise Exception("Error login in {}\n{}".
                             format(self.username, self.browser.response.text))
+        return self
 
     def process_action(self, action, mappings):
 
@@ -64,6 +88,8 @@ class OpsManApi(object):
                 raise Exception("Error submitting form " +
                                 self.browser.response.text)
 
+        return self
+
     def load_mappings(self, filename):
         """
         load mappings and hydrate using self, stack_vars
@@ -96,6 +122,8 @@ class OpsManApi(object):
             ac, mp = mapping.items()[0]
             if action is None or action == ac:
                 self.process_action(ac, mp)
+
+        return self
 
     def apply_changes(self):
         self.browser.open(self.url, verify=False)

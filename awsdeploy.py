@@ -5,10 +5,13 @@ import yaml
 from datetime import datetime
 import os
 import time
-
+import requests
+import requests.exceptions
 import pivnet
 import opsmanapi
 
+
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 def get_stack_outputvars(stack, ec2):
     ops = {v['OutputKey']: v['OutputValue'] for v in stack.outputs}
@@ -71,8 +74,10 @@ def launch_ops_manager(opts, stack_vars, ec2):
     """
     insts = list(ec2.instances.filter(
         Filters=[{'Name': 'tag:Name', 'Values': ['Ops Manager']},
-                 {'Name': 'tag:stack-name', 'Values': [opts['stack-name']]}]))
+                 {'Name': 'tag:stack-name', 'Values': [opts['stack-name']]},
+                 {'Name': 'instance-state-name', 'Values': ['running']}]))
     if len(insts) == 1:
+        print "Found running ops manager ", insts[0].id
         return insts[0]
     elif len(insts) > 1:
         raise Exception("Several Ops Managers running {} for stack {}".format(
@@ -96,29 +101,70 @@ def launch_ops_manager(opts, stack_vars, ec2):
                      "VolumeType": "gp2"
                      }
              }]
-        )
+        )[0]
     inst.wait_until_exists()
     inst.create_tags(
         Tags=[{'Key': 'Name', 'Value': 'Ops Manager'},
               {'Key': 'stack-name', 'Value': opts['stack-name']}])
+    print "Waiting for instance to start", inst.id
+    inst.wait_until_running()
     return inst
 
 
-
-def configure_ops_manager(opts, stack_vars, ops_manager_inst):
+def configure_ops_manager(opts, stack_vars, inst):
     ops = opsmanapi.OpsManApi(
-            "https://ec2-54-88-79-182.compute-1.amazonaws.com",
-            "admin",
-            "keepitsimple",
-            "/Users/mjog/.ssh/id_rsa",
-            ops1)
+        "https://"+inst.public_dns_name,
+        opts['opsman-username'],
+        opts['opsman-password'],
+        os.path.expanduser(opts['ssh_private_key_path']),
+        stack_vars,
+        opts['region'])
+
+    ops.setup().login()
+
+    ops.process_mappings(THIS_DIR+'/opsman_mappings.yml')
+
+    print "Applying changes"
+    ops.apply_changes()
 
 
 class TimeoutException(Exception):
     pass
 
 
+def wait_while(condition, refresh=lambda: True):
+    def waitfor(timeout):
+        waited = 0
+        SLEEPTIME = 5
+
+        refresh()
+        if not condition():
+            return True
+
+        while waited < timeout and condition():
+            time.sleep(SLEEPTIME)
+            waited += SLEEPTIME
+            refresh()
+        if condition():
+            raise TimeoutException()
+
+    return waitfor
+
+
 def wait_for_stack_ready(st, timeout):
+    waiter = wait_while(
+        lambda: st.stack_status == 'CREATE_IN_PROGRESS',
+        lambda: st.reload())
+    waiter(timeout)
+
+    if st.stack_status == 'CREATE_COMPLETE':
+        return True
+
+    raise Exception("Stack {} is in bad state {}".format(
+        st.name, st.stack_status))
+
+
+def wait_for_stack_ready1(st, timeout):
     waited = 0
     SLEEPTIME = 5
     st.reload()
@@ -138,6 +184,23 @@ def wait_for_stack_ready(st, timeout):
 
     raise Exception("Stack {} is in bad state {}".format(
         st.name, st.stack_status))
+
+
+def wait_for_opsman_ready(inst, timeout):
+    def shoud_wait():
+        try:
+            resp = requests.head(
+                "https://{}/eula".format(inst.public_dns_name),
+                verify=False, timeout=1)
+            return resp.status_code != 200
+        except requests.exceptions.RequestException as ex:
+            pass
+        except requests.HTTPError as ex:
+            print ex
+        return True
+
+    waiter = wait_while(shoud_wait)
+    return waiter(timeout)
 
 
 def deloy(prepared_file, timeout=300):
@@ -164,6 +227,7 @@ def deloy(prepared_file, timeout=300):
     ops_manager_inst = launch_ops_manager(opts, stack_vars, ec2)
 
     # ensure that ops manager is ready to receive requests
+    wait_for_opsman_ready(ops_manager_inst, timeout)
     configure_ops_manager(opts, stack_vars, ops_manager_inst)
 
 
