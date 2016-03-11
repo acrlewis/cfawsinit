@@ -3,6 +3,28 @@ from robobrowser import RoboBrowser
 from robobrowser import forms
 import yaml
 import requests
+import requests.auth
+import os
+from mako.template import Template
+from mako.runtime import Context
+from StringIO import StringIO
+import copy
+
+THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def get(*args, **kwargs):
+    # bs4.find("span", {'class': 'version'})
+    resp = requests. head(
+        args[0]+"/uaa/login",
+        verify=False,
+        allow_redirects=False)
+    # somewhat of a hack
+    # pre api ops manager do not have /api/v0 endpoints
+    if resp.status_code == 404:
+        return OpsManApi(*args, **kwargs)
+    else:
+        return OpsManApi17(*args, **kwargs)
 
 
 class OpsManApi(object):
@@ -11,6 +33,7 @@ class OpsManApi(object):
         self.url = url
         self.username = username
         self.password = password
+        self.auth = requests.auth.HTTPBasicAuth(username, password)
         self.private_key = open(private_key_file, "rt").read()
         self.browser = RoboBrowser(history=True)
         self.var = stack_vars
@@ -19,6 +42,7 @@ class OpsManApi(object):
             self.s3_endpoint = "https://s3.amazonaws.com"
         else:
             self.s3_endpoint = "https://s3-{}.amazonaws.com".format(region)
+        self.action_map_file = THIS_DIR+'/opsman_mappings.yml'
 
     def setup(self):
         setup_data = {'setup[eula_accepted]': 'true',
@@ -54,14 +78,32 @@ class OpsManApi(object):
         return self
 
     def process_action(self, action, mappings):
+        # check if this is already prepared
+        resp = requests.get(
+            self.url+"/api/installation_settings",
+            verify=False,
+            auth=self.auth)
+        if resp.status_code == 200:
+            jx = resp.json()
+            if 'singleton_availability_zone_reference' in jx['products'][0]\
+                    and jx['products'][0]['prepared'] is True:
+                print "Product is already prepared"
+                return self
 
+        self.browser.open(self.url + "/", verify=False)
         form = None
+        suffix = mappings.get('__edit__', "/edit")
+        self.browser.open(self.url + "/" + action + suffix, verify=False)
+        form = self.browser.get_form(action='/' + action)
+
+        """
         for suffix in ["/new", "/edit"]:
             self.browser.open(self.url + "/" + action + suffix, verify=False)
+            raise Exception()
             form = self.browser.get_form(action='/' + action)
             if form is not None:
                 break
-
+        """
         if form is None:
             raise Exception("Could not find form for action="+action)
 
@@ -70,6 +112,12 @@ class OpsManApi(object):
         for k, v in mappings.items():
             if k.startswith("__"):
                 continue
+            if k not in form.keys() and "__force__" in mappings:
+                field = forms.form._parse_fields(
+                    BeautifulSoup('<input type="text" name="{}" />'.format(k))
+                )[0]
+                form.add_field(field)
+
             form[k].value = v
             print k, "=", v
 
@@ -90,7 +138,7 @@ class OpsManApi(object):
 
         return self
 
-    def load_mappings(self, filename):
+    def _load_mappings(self, filename):
         """
         load mappings and hydrate using self, stack_vars
         """
@@ -116,8 +164,10 @@ class OpsManApi(object):
                                         " as a stack output variable")
         return mappings
 
-    def process_mappings(self, filename, action=None):
-        mappings = self.load_mappings(filename)
+    def configure(self, filename=None, action=None):
+        filename = filename or self.action_map_file
+
+        mappings = self._load_mappings(filename)
         for mapping in mappings:
             ac, mp = mapping.items()[0]
             if action is None or action == ac:
@@ -144,8 +194,108 @@ class OpsManApi(object):
             self.browser.submit_form(forms.form.Form(inst_form))
 
 
-"""
-In [218]: ops1['PcfVmsSecurityGroupName'] = list(ec2.security_groups.filter(GroupIds=[ops1['PcfVmsSecurityGroupId']]))[0].group_name
+class CFAuthHandler(requests.auth.AuthBase):
+    def __init__(self, username, password):
+        self.username = username
+        self.password = password
+        self.uaa = None
 
-In [219]: ops = { v['OutputKey']: v['OutputValue'] for v in stx.outputs}
-"""
+    def __call__(self, req):
+        if self.uaa is None:
+            url = req.url[:-len(req.path_url)]
+            self.uaa = self._uaa(url)
+
+        req.headers['Authorization'] = "Bearer "+self.uaa['access_token']
+        return req
+
+    def _uaa(self, url):
+        resp = requests.post(
+            url+"/uaa/oauth/token",
+            verify=False,
+            data={'grant_type': 'password',
+                  'username': self.username,
+                  'password': self.password},
+            auth=('opsman', ''))
+
+        if resp.status_code != 200:
+            raise Exception("Unable to authenticate "+resp.text)
+
+        return resp.json()
+
+
+class OpsManApi17(OpsManApi):
+
+    def __init__(self, *args, **kwargs):
+        super(OpsManApi17, self).__init__(*args, **kwargs)
+        # self.action_map_file = THIS_DIR+'/opsman_mappings17.yml'
+        self.action_map_file = THIS_DIR+'/installation-aws-1.7.yml'
+
+    def setup(self):
+        setup_data = {
+            'setup[eula_accepted]': 'true',
+            'setup[identity_provider]': 'internal',
+            'setup[decryption_passphrase]': self.password,
+            'setup[decryption_passphrase_confirmation]': self.password,
+            'setup[admin_password]': self.password,
+            'setup[admin_password_confirmation]': self.password,
+            'setup[admin_user_name]': self.username}
+
+        resp = requests.post(
+            self.url + "/api/v0/setup",
+            data=setup_data,
+            verify=False,
+            allow_redirects=False)
+
+        if resp.status_code == 200:
+            print "Admin user established", resp.json()
+        elif resp.status_code == 422:
+            jx = resp.json()
+            if 'errors' in jx:
+                raise Exception("Could not establish user: {}".
+                                format(jx['errors']))
+            else:
+                print "Admin user is already established"
+        return self
+
+    def login(self):
+        self.auth = CFAuthHandler(self.username, self.password)
+        self.browser.open(self.url + "/uaa/login", verify=False)
+        form = self.browser.get_form(action='/uaa/login.do')
+        form['username'].value = self.username
+        form['password'].value = self.password
+        self.browser.submit_form(form)
+        if self.browser.response.status_code >= 400:
+            raise Exception("Error login in {}\n{}".
+                            format(self.username, self.browser.response.text))
+        return self
+
+    def configure(self, filename=None, action=None):
+        filename = filename or self.action_map_file
+        template = Template(filename=filename)
+        buf = StringIO()
+        dct = copy.copy(self.var)
+        self.private_key = self.private_key.replace('\n', '\n        ')
+        dct['v'] = self
+        ctx = Context(buf, **dct)
+        template.render_context(ctx)
+        yamlfile = buf.getvalue()
+        files = {'installation[file]':
+                 ('installation-integration-minimal.yml',
+                     yamlfile, 'text/yaml')}
+        resp = requests.post(
+            self.url+"/api/installation_settings",
+            files=files,
+            verify=False,
+            auth=self.auth)
+        if resp.status_code != 200:
+            raise Exception("Unable to configure "+resp.text)
+        return self
+
+    def apply_changes(self):
+        resp = requests.post(
+            self.url+'/api/v0/installation',
+            verify=False,
+            data={'ignore_warnings': True},
+            auth=self.auth)
+        if resp.status_code != 200:
+            raise Exception("Unable to start install, "+resp.text)

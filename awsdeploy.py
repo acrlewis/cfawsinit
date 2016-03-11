@@ -13,6 +13,7 @@ import opsmanapi
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
+
 def get_stack_outputvars(stack, ec2):
     ops = {v['OutputKey']: v['OutputValue'] for v in stack.outputs}
     # group name is needed in a few places
@@ -112,7 +113,7 @@ def launch_ops_manager(opts, stack_vars, ec2):
 
 
 def configure_ops_manager(opts, stack_vars, inst):
-    ops = opsmanapi.OpsManApi(
+    ops = opsmanapi.get(
         "https://"+inst.public_dns_name,
         opts['opsman-username'],
         opts['opsman-password'],
@@ -122,7 +123,7 @@ def configure_ops_manager(opts, stack_vars, inst):
 
     ops.setup().login()
 
-    ops.process_mappings(THIS_DIR+'/opsman_mappings.yml')
+    ops.configure()
 
     print "Applying changes"
     ops.apply_changes()
@@ -190,9 +191,9 @@ def wait_for_opsman_ready(inst, timeout):
     def shoud_wait():
         try:
             resp = requests.head(
-                "https://{}/eula".format(inst.public_dns_name),
+                "https://{}/".format(inst.public_dns_name),
                 verify=False, timeout=1)
-            return resp.status_code != 200
+            return resp.status_code >= 400
         except requests.exceptions.RequestException as ex:
             pass
         except requests.HTTPError as ex:

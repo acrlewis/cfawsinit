@@ -1,0 +1,109 @@
+---
+# based on /home/tempest-web/tempest/web/spec/fixtures/installations/current
+# (1.7) installation-with-p-bosh-for-aws.yml
+installation_schema_version: '1.7'
+infrastructure:
+  type: aws
+  icmp_checks_enabled: true
+  director_configuration:
+      # metrics_ip:
+    resurrector_enabled: true
+    ntp_servers:
+    - 0.amazon.pool.ntp.org
+    - 1.amazon.pool.ntp.org
+    - 2.amazon.pool.ntp.org
+    blobstore_type: s3
+    s3_blobstore_options:
+        endpoint: ${v.s3_endpoint}
+        bucket_name: ${PcfOpsManagerS3Bucket}
+        access_key: ${PcfIamUserAccessKey}
+        secret_key: ${PcfIamUserSecretAccessKey}
+    database_type: external
+    external_database_options:
+        host: ${PcfRdsAddress}
+        port: ${PcfRdsPort}
+        user: ${PcfRdsUsername}
+        password: ${PcfRdsPassword}
+        database: ${PcfRdsDBName}
+  networks:
+  - guid: network-${PcfPrivateSubnetId}
+    name: Default
+    subnets:
+      - guid: subnet-${PcfPrivateSubnetId}
+        iaas_identifier: ${PcfPrivateSubnetId}
+        cidr: 10.0.16.0/20
+        dns: 10.0.0.2
+        gateway: 10.0.16.1
+        reserved_ip_ranges: 10.0.16.1-10.0.16.9
+        availability_zone_references:
+        - 036869c751e2d7150f92
+  iaas_configuration:
+    region: ${v.region}
+    access_key_id: ${PcfIamUserAccessKey}
+    secret_access_key: ${PcfIamUserSecretAccessKey}
+    vpc_id: ${PcfVpc}
+    security_group: ${PcfVmsSecurityGroupId}
+    key_pair_name: ${PcfKeyPairName}
+    ssh_private_key: |-
+        ${v.private_key}
+  availability_zones:
+  - guid: 036869c751e2d7150f92
+    iaas_identifier:  ${PcfPrivateSubnetAvailabilityZone}
+
+products:
+- guid: p-bosh-guid
+  installation_name: p-bosh-guid
+  product_version: 1.7.0.0
+  prepared: true
+  jobs:
+  - guid: director-guid
+    installation_name: director
+    vm_credentials:
+      identity: vcap1
+      password: vm-password1
+      salt: vm-salt-12345687
+    properties:
+    - value:
+        identity: vcap
+      identifier: agent_credentials
+    - value:
+        identity: registry
+      identifier: registry_credentials
+    - value:
+        identity: director
+        password: director-password
+      identifier: director_credentials
+    - value:
+        identity: nats
+      identifier: nats_credentials
+    - value:
+        identity: redis
+      identifier: redis_credentials
+    - value:
+        identity: postgres
+      identifier: postgres_credentials
+    - value:
+        identity: blobstore
+      identifier: blobstore_credentials
+    - value:
+        identity: health_monitor
+      identifier: health_monitor_credentials
+    - identifier: director_ssl
+    instances:
+    - value: 1
+      identifier: instances
+    resources:
+    - value: 3072
+      identifier: ram
+    - value: 16384
+      identifier: ephemeral_disk
+    - value: 20480
+      identifier: persistent_disk
+    - value: 2
+      identifier: cpu
+    identifier: director
+  identifier: p-bosh
+  network_reference: network-${PcfPrivateSubnetId}
+  singleton_availability_zone_reference: 036869c751e2d7150f92
+  availability_zone_references:
+  - 036869c751e2d7150f92
