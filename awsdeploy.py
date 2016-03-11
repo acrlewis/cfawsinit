@@ -125,9 +125,6 @@ def configure_ops_manager(opts, stack_vars, inst):
 
     ops.configure()
 
-    print "Applying changes"
-    ops.apply_changes()
-
 
 class TimeoutException(Exception):
     pass
@@ -230,6 +227,10 @@ def deloy(prepared_file, timeout=300):
     # ensure that ops manager is ready to receive requests
     wait_for_opsman_ready(ops_manager_inst, timeout)
     configure_ops_manager(opts, stack_vars, ops_manager_inst)
+
+    ert_file = upload_ert_to_ops_manager(ops_manager_inst, opts)
+    # ensure that ops manager is ready to receive request
+    install_ert_to_ops_manager(ops_manager_inst, opts, ert_file)
 
 
 def resolve_versions(token, opsman, ert):

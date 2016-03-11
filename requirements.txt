@@ -3,3 +3,4 @@ pyyaml
 robobrowser
 bs4
 mako
+sh

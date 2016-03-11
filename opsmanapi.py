@@ -77,7 +77,7 @@ class OpsManApi(object):
                             format(self.username, self.browser.response.text))
         return self
 
-    def process_action(self, action, mappings):
+    def _is_configured(self):
         # check if this is already prepared
         resp = requests.get(
             self.url+"/api/installation_settings",
@@ -88,7 +88,13 @@ class OpsManApi(object):
             if 'singleton_availability_zone_reference' in jx['products'][0]\
                     and jx['products'][0]['prepared'] is True:
                 print "Product is already prepared"
-                return self
+                return True
+
+        return False
+
+    def process_action(self, action, mappings):
+        if self._is_configured():
+            return self
 
         self.browser.open(self.url + "/", verify=False)
         form = None
@@ -173,9 +179,11 @@ class OpsManApi(object):
             if action is None or action == ac:
                 self.process_action(ac, mp)
 
+        self.apply_changes()
         return self
 
     def apply_changes(self):
+        print "Applying Changes"
         self.browser.open(self.url, verify=False)
         soup = BeautifulSoup(self.browser.response.text)
         fx = soup.find('meta', {"name": 'csrf-token'})
@@ -259,17 +267,19 @@ class OpsManApi17(OpsManApi):
 
     def login(self):
         self.auth = CFAuthHandler(self.username, self.password)
-        self.browser.open(self.url + "/uaa/login", verify=False)
-        form = self.browser.get_form(action='/uaa/login.do')
-        form['username'].value = self.username
-        form['password'].value = self.password
-        self.browser.submit_form(form)
-        if self.browser.response.status_code >= 400:
+        resp = requests.get(
+            self.url+"/api/v0/api_version",
+            verify=False,
+            auth=self.auth)
+        if resp.status_code >= 400:
             raise Exception("Error login in {}\n{}".
                             format(self.username, self.browser.response.text))
         return self
 
-    def configure(self, filename=None, action=None):
+    def configure(self, filename=None, action=None, force=False):
+        if not force and self._is_configured():
+            return self
+
         filename = filename or self.action_map_file
         template = Template(filename=filename)
         buf = StringIO()
@@ -289,9 +299,13 @@ class OpsManApi17(OpsManApi):
             auth=self.auth)
         if resp.status_code != 200:
             raise Exception("Unable to configure "+resp.text)
+
+        self.apply_changes()
+
         return self
 
     def apply_changes(self):
+        print "Applying Changes"
         resp = requests.post(
             self.url+'/api/v0/installation',
             verify=False,
