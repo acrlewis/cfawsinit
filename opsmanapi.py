@@ -231,6 +231,21 @@ class CFAuthHandler(requests.auth.AuthBase):
         return resp.json()
 
 
+def getUAA_Auth_Header(username, password, url):
+    resp = requests.post(
+        url+"/uaa/oauth/token",
+        verify=False,
+        data={'grant_type': 'password',
+              'username': username,
+              'password': password},
+        auth=('opsman', ''))
+
+    if resp.status_code != 200:
+        raise Exception("Unable to authenticate "+resp.text)
+
+    return "Bearer "+resp.json()['access_token']
+
+
 class OpsManApi17(OpsManApi):
 
     def __init__(self, *args, **kwargs):
