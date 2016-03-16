@@ -6,6 +6,10 @@ import sys
 import time
 
 
+class AuthException(Exception):
+    pass
+
+
 class Pivnet(object):
 
     def __init__(self, token=None, url_base=None):
@@ -17,10 +21,10 @@ class Pivnet(object):
     def _validate_(self):
         """ ensure that you can logon to pivnet """
         if self.token is None:
-            raise Exception("PIVNET_TOKEN env var is not exported")
+            raise AuthException("PIVNET_TOKEN env var is not exported")
         ans = self.get("{}/authentication".format(self.url_base))
         if ans.status_code != 200:
-            raise Exception(ans.text)
+            raise AuthException(ans.text)
 
     def get(self, url, **kwargs):
         return requests.get(url, headers=self.auth_header, **kwargs)
