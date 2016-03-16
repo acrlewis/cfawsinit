@@ -9,6 +9,7 @@ import requests
 import requests.exceptions
 import pivnet
 import opsmanapi
+import sh
 
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -122,8 +123,8 @@ def configure_ops_manager(opts, stack_vars, inst):
         opts['region'])
 
     ops.setup().login()
-
     ops.configure()
+    return ops
 
 
 class TimeoutException(Exception):
@@ -201,7 +202,7 @@ def wait_for_opsman_ready(inst, timeout):
     return waiter(timeout)
 
 
-def deloy(prepared_file, timeout=300):
+def deploy(prepared_file, timeout=300):
     """
     Topline driver
     idempotent
@@ -233,6 +234,63 @@ def deloy(prepared_file, timeout=300):
     install_ert_to_ops_manager(ops_manager_inst, opts, ert_file)
 
 
+def execute_on_opsman(ops_manager_inst, opts, cmd):
+    from sh import ssh
+    ssh("-i {} ".format(opts['ssh_private_key_path']),
+        "ubuntu@"+ops_manager_inst.public_dns_name,
+        cmd)
+
+
+def upload_ert_to_ops_manager(ops_manager_inst, opts):
+    """
+    logon to opsman and download the
+    ert file from pivnet
+
+    it runs the command *from* ops manager
+    so it can be locally uploaded
+    """
+    filename = "cf-ert.{}.pivotal".format(opts['elastic-runtime']['version'])
+    CMD = ""
+    if '_NO_CACHE_' not in os.environ:
+        CMD += '[[ -e {filename} ]] || '
+    CMD += (
+        'wget -O {filename} --post-data="" '
+        '--header="Authorization: Token {token}" {url}')
+
+    cmd = CMD.format(
+        filename=filename,
+        token=opts['PIVNET_TOKEN'],
+        url=opts['elastic-runtime']['image-file-url'])
+
+    from sh import ssh
+    print "Downloading ERT {} onto the opsmanager".format(filename)
+    ssh(
+        "ubuntu@"+ops_manager_inst.public_dns_name,
+        cmd,
+        i=opts['ssh_private_key_path'])
+    return filename
+
+
+def install_ert_to_ops_manager(ops_manager_inst, opts, ert_file):
+    CMD = (
+        'curl -v -k https://localhost/api/v0/products '
+        '-F \'product[file]=@{filename}\' '
+        '-X POST '
+        '-H "Authorization: {auth}"')
+
+    cmd = CMD.format(
+        filename=ert_file,
+        auth=opsmanapi.getUAA_Auth_Header(
+            opts['opsman-username'],
+            opts['opsman-password'],
+            "https://" + ops_manager_inst.public_dns_name))
+    from sh import ssh
+    ssh(
+        "ubuntu@"+ops_manager_inst.public_dns_name,
+        cmd,
+        i=opts['ssh_private_key_path'])
+
+
 def resolve_versions(token, opsman, ert):
     """
     resolve and return 2 new dicts which will replace the old
@@ -255,15 +313,33 @@ def resolve_versions(token, opsman, ert):
     cloudformation = next((f for f in files
                           if 'cloudformation script for aws'
                           in f['name'].lower()), None)
-    if cloudformation is None:
-        raise Exception(
-            "Could not find link for 'cloudformation template for aws' in "
-            + str(elastic_runtime_ver)+" "+files)
+    if cloudformation is not None:
+        filename, dn = piv.download(elastic_runtime_ver, cloudformation)
+        ert_out['cloudformation-template-version'] = \
+            elastic_runtime_ver['version']
+    else:
+        print ("Could not find cloud formation template for ver =",
+               elastic_runtime_ver)
+        print "Trying latest available"
+        vv = piv.latest_file(
+            'elastic-runtime',
+            ert['beta-ok'],
+            ert['version'],
+            selector=lambda x:
+            'cloudformation script for aws' in x['name'].lower())
+        if vv is not None:
+            vr, cloudformation = vv
+            filename, dn = piv.download(vr, cloudformation)
+            ert_out['cloudformation-template-version'] = vr['version']
+        else:
+            raise Exception(
+                ("Could not find link for "
+                 "'cloudformation template for aws' in {} {}".format(
+                     elastic_runtime_ver, files)))
+
+    ert_out['cloudformation-template'] = filename
     ert_out['cloudformation-template-url'] = \
         pivnet.href(cloudformation, 'download')
-
-    filename, dn = piv.download(elastic_runtime_ver, cloudformation)
-    ert_out['cloudformation-template'] = filename
     er = next((f for f in files if 'PCF Elastic Runtime' == f['name']), None)
     if er is None:
         raise Exception(
@@ -281,7 +357,8 @@ def prepare_deploy(infilename, outfilename):
     fully resolve it and produce outfile.yml
     """
     infile = yaml.load(open(infilename, 'rt'))
-    infile['random'] = str(uuid.uuid4())[:6]
+    if 'random' not in infile:
+        infile['random'] = str(uuid.uuid4())[:6]
     stack_name = infile['email'].partition('@')[0] + "-pcf-" + infile['random']
     date = datetime.utcnow()
 
