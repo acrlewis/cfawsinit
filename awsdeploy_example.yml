@@ -11,4 +11,6 @@ ops-manager:
 elastic-runtime:
     version: latest
     beta-ok: false
+# If you have a real cert, put it here
+# otherwise this is a self signed cert
 ssl_cert_arn: arn:aws:iam::375783000519:server-certificate/mjogCertificate
