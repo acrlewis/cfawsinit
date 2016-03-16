@@ -331,12 +331,13 @@ def resolve_versions(token, opsman, ert, ec2):
                           if 'cloudformation script for aws'
                           in f['name'].lower()), None)
     if cloudformation is not None:
-        filename, dn = piv.download(elastic_runtime_ver, cloudformation)
+        filename, dn = piv.download(
+            elastic_runtime_ver, cloudformation, quiet=True)
         ert_out['cloudformation-template-version'] = \
             elastic_runtime_ver['version']
     else:
-        print ("Could not find cloud formation template for ver =",
-               elastic_runtime_ver)
+        print "Could not find cloudformation template for ver = {}".format(
+            elastic_runtime_ver['version'])
         print "Trying latest available"
         vv = piv.latest_file(
             'elastic-runtime',
@@ -346,8 +347,10 @@ def resolve_versions(token, opsman, ert, ec2):
             'cloudformation script for aws' in x['name'].lower())
         if vv is not None:
             vr, cloudformation = vv
-            filename, dn = piv.download(vr, cloudformation)
+            filename, dn = piv.download(vr, cloudformation, quiet=True)
             ert_out['cloudformation-template-version'] = vr['version']
+            print "Found cloudformation template for ver = {}".format(
+                vr['version'])
         else:
             raise Exception(
                 ("Could not find link for "
@@ -425,8 +428,7 @@ def verify_ssh_key(ec2, key_file, ec2_keypair_name):
     """
     ensure that the keypair matches
     """
-    info = ec2.KeyPair(ec2_keypair_name)
-    print info.key_fingerprint
+    ec2.KeyPair(ec2_keypair_name)
     # TODO verify this fingerprint with the key on disk
     open(os.path.expanduser(key_file), 'rt').read()
 

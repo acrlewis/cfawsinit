@@ -92,7 +92,7 @@ class Pivnet(object):
     """ 'https://network.pivotal.io/api/v2/products/
     elastic-runtime/releases/1530/product_files/2946/download'
     """
-    def download(self, ver, filedict, filename=None):
+    def download(self, ver, filedict, filename=None, quiet=False):
         filename = filename or os.path.basename(filedict['aws_object_key'])
         resp = self.post(href(filedict, 'download'), allow_redirects=False)
         if resp.status_code == 451:
@@ -113,14 +113,19 @@ class Pivnet(object):
             def __call__(self, nblocks, block_size, size):
                 if self.started is False:
                     self.started = True
-                    print " size: ", size
+                    if quiet is False:
+                        print " size: ", size
                 if (100.0 * nblocks * block_size)/size > self.lpr:
                     tm_end = time.time()
-                    print >> sys.stderr, self.lpr, " ({} kBps)".format(
-                        int((nblocks * block_size)/(1000.0*(tm_end-self.tm)))),
+                    if quiet is False:
+                        print >> sys.stderr, \
+                            self.lpr, " ({} kBps)".format(
+                                int((nblocks * block_size) /
+                                    (1000.0*(tm_end-self.tm)))),
                     self.lpr += 10
 
-        print "\nDownloading ", filename,
+        if quiet is False:
+            print "\nDownloading ", filename,
         return filename, urllib.urlretrieve(
             resp.headers['location'], filename, _progress_hook())
 
