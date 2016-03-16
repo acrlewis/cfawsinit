@@ -28,7 +28,7 @@ class Pivnet(object):
     def post(self, url, **kwargs):
         return requests.post(url, headers=self.auth_header, **kwargs)
 
-    def latest(self, product, include_unreleased=False, version=None):
+    def _latest(self, product, include_unreleased=False, version=None):
         """ https://network.pivotal.io
             /api/v2/products/elastic-runtime/releases
         """
@@ -51,22 +51,42 @@ class Pivnet(object):
                             "v={}, {}".format(
                                 product, version, releases.keys()))
 
-        maxver = max(vers)
-        return releases[maxver]
+        return [releases[v] for v in sorted(vers, reverse=True)]
+
+    def latest(self, product, include_unreleased=False, version=None):
+        """ https://network.pivotal.io
+            /api/v2/products/elastic-runtime/releases
+        """
+        return self._latest(product, include_unreleased, version)[0]
+
+    def latest_file(self, product, include_unreleased, version, selector):
+        vers = self._latest(product, include_unreleased, version)
+
+        for ver in vers:
+            for fl in self.productfiles(product, ver['id']):
+                if selector(fl):
+                    return ver, fl
 
     def productfiles(self, product, releaseNumber):
         return self.get("{}/products/{}/releases/{}/product_files".format(
             self.url_base, product, releaseNumber)).json()['product_files']
 
+    def files(self, product, releaseNumber):
+        return self.get("{}/products/{}/releases/{}/product_files".format(
+            self.url_base, product, releaseNumber)).json()
 
     def acceptEULA(self, verDict):
         # eula acceptance per spec
         print "Accepting EULA for the relase"
-        resp = self.post(href(verDict, 'eula_acceptance'), allow_redirects=False)
+        resp = self.post(href(verDict, 'eula_acceptance'),
+                         allow_redirects=False)
         if resp.status_code != 200:
-           raise Exception ("Could not auto accept eula" + href(verDict, 'eula_acceptance') + " " +str(resp.headers)) 
+            raise Exception("Could not auto accept eula" +
+                            href(verDict, 'eula_acceptance') +
+                            " " + str(resp.headers))
 
-    """ 'https://network.pivotal.io/api/v2/products/elastic-runtime/releases/1530/product_files/2946/download'
+    """ 'https://network.pivotal.io/api/v2/products/
+    elastic-runtime/releases/1530/product_files/2946/download'
     """
     def download(self, ver, filedict, filename=None):
         filename = filename or os.path.basename(filedict['aws_object_key'])
@@ -76,9 +96,10 @@ class Pivnet(object):
             resp = self.post(href(filedict, 'download'), allow_redirects=False)
 
         if resp.status_code != 302:
-            raise Exception("Could not download " +
-                    href(filedict, 'download') + " " 
-                    +str(resp.headers))
+            raise Exception(
+                "Could not download " +
+                href(filedict, 'download') + " "
+                + str(resp.headers))
 
         class _progress_hook(object):
             lpr = 10
@@ -90,31 +111,15 @@ class Pivnet(object):
                     self.started = True
                     print " size: ", size
                 if (100.0 * nblocks * block_size)/size > self.lpr:
-                    tm_end = time.time() 
-                    print >> sys.stderr, self.lpr," ({} kBps)".format(int((nblocks * block_size)/(1000.0*(tm_end-self.tm)))),
+                    tm_end = time.time()
+                    print >> sys.stderr, self.lpr, " ({} kBps)".format(
+                        int((nblocks * block_size)/(1000.0*(tm_end-self.tm)))),
                     self.lpr += 10
 
         print "\nDownloading ", filename,
-        return filename, urllib.urlretrieve(resp.headers['location'], filename, _progress_hook())
+        return filename, urllib.urlretrieve(
+            resp.headers['location'], filename, _progress_hook())
 
 
 def href(obj, key):
     return obj['_links'][key]['href']
-
-
-if __name__ == "__main__":
-
-    piv = Pivnet()
-    ver = piv.latest('elastic-runtime')
-    print "Selected version", ver["version"]
-    files = piv.productfiles('elastic-runtime', ver['id'])
-
-    cloudformation = next((f for f in files if 'cloudformation script for aws' in f['name'].lower()), None)
-    if cloudformation is None:
-        raise Exception ("Could not find link for 'cloudformation script for aws' in "+ver+" "+files)
-
-    er = next((f for f in files if 'PCF Elastic Runtime' == f['name']), None)
-    if er is None:
-        raise Exception ("Could not find link for 'PCF Elastic Runtime' in "+ver+" "+files)
-    #dn = piv.download(ver, cloudformation)
-    #dn1 = piv.download(ver, er)
