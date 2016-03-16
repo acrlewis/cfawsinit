@@ -9,7 +9,7 @@ import requests
 import requests.exceptions
 import pivnet
 import opsmanapi
-import sh
+import sys
 
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -213,7 +213,7 @@ def deploy(prepared_file, timeout=300):
         raise Exception("using 'unprepared' file to deploy."
                         " First run prepare on it")
 
-    session = Session(profile_name=None,
+    session = Session(profile_name=opts.get('profile_name'),
                       region_name=opts['region'])
     ec2 = session.resource("ec2")
     cff = session.resource("cloudformation")
@@ -291,17 +291,34 @@ def install_ert_to_ops_manager(ops_manager_inst, opts, ert_file):
         i=opts['ssh_private_key_path'])
 
 
-def resolve_versions(token, opsman, ert):
+AMI_PREFIX = "pivotal-ops-manager-v"
+PCF_AWS_OWNERID = '364390758643'
+
+
+def resolve_versions(token, opsman, ert, ec2):
     """
     resolve and return 2 new dicts which will replace the old
     """
     piv = pivnet.Pivnet(token=token)
-    opsman_ver = piv.latest('ops-manager',
-                            opsman['beta-ok'],
-                            opsman['version'])
+    opsman_vers = piv._latest(
+        'ops-manager',
+        opsman['beta-ok'],
+        opsman['version'])
 
-    opsman_out = {'version': opsman_ver['version'],
-                  'beta-ok': opsman['beta-ok']}
+    amidict = {
+        e.name[len(AMI_PREFIX):]: e for e in
+        ec2.images.filter(
+            Owners=[PCF_AWS_OWNERID])
+        if e.name.startswith(AMI_PREFIX)}
+
+    ami = next(
+        amidict[vv['version']] for vv in opsman_vers
+        if vv['version'] in amidict)
+
+    opsman_out = {'version': opsman_vers[0]['version'],
+                  'beta-ok': opsman['beta-ok'],
+                  'ami-id': ami.image_id,
+                  'ami-name': ami.name}
     elastic_runtime_ver = piv.latest('elastic-runtime',
                                      ert['beta-ok'],
                                      ert['version'])
@@ -357,9 +374,9 @@ def prepare_deploy(infilename, outfilename):
     fully resolve it and produce outfile.yml
     """
     infile = yaml.load(open(infilename, 'rt'))
-    if 'random' not in infile:
-        infile['random'] = str(uuid.uuid4())[:6]
-    stack_name = infile['email'].partition('@')[0] + "-pcf-" + infile['random']
+    if 'uid' not in infile:
+        infile['uid'] = str(uuid.uuid4())[:6]
+    stack_name = infile['email'].partition('@')[0] + "-pcf-" + infile['uid']
     date = datetime.utcnow()
 
     outfile = {k: v.format(**infile)
@@ -368,20 +385,17 @@ def prepare_deploy(infilename, outfilename):
     outfile['stack-name'] = stack_name
     outfile['date'] = date
 
-    opsman_ver, elastic_runtime_ver =\
-        resolve_versions(infile['PIVNET_TOKEN'],
-                         infile['ops-manager'],
-                         infile['elastic-runtime'])
-
-    outfile['ops-manager'] = opsman_ver
-    outfile['elastic-runtime'] = elastic_runtime_ver
-
     ec2 = Session(profile_name=None,
                   region_name=outfile['region']).resource("ec2")
 
-    ami_name = "pivotal-ops-manager-v" + opsman_ver['version']
-    opsman_ver['ami-id'] = find_ami(ec2, ami_name)
-    opsman_ver['ami-name'] = ami_name
+    opsman_ver, elastic_runtime_ver =\
+        resolve_versions(infile['PIVNET_TOKEN'],
+                         infile['ops-manager'],
+                         infile['elastic-runtime'],
+                         ec2)
+
+    outfile['ops-manager'] = opsman_ver
+    outfile['elastic-runtime'] = elastic_runtime_ver
 
     verify_ssh_key(ec2, outfile['ssh_private_key_path'],
                    outfile['ssh_key_name'])
@@ -398,27 +412,13 @@ def prepare_deploy(infilename, outfilename):
     set_if_empty('opsman-username', 'admin')
     set_if_empty('opsman-password', 'keepitsimple')
 
-    yaml.safe_dump(outfile, open(outfilename, 'wt'),
+    yamlout = open(outfilename, 'wt')\
+        if outfilename is not None \
+        else sys.stdout
+
+    yaml.safe_dump(outfile, yamlout,
                    indent=2, default_flow_style=False)
     return outfile
-
-
-PCF_AWS_OWNERID = '364390758643'
-
-
-def find_ami(ec2, ami_name):
-    amis = list(
-        ec2.images.filter(
-            Owners=[PCF_AWS_OWNERID],
-            Filters=[{'Name': 'name', 'Values': [ami_name]}]))
-
-    if len(amis) == 0:
-        raise Exception("unable to find ami for " + ami_name)
-
-    ami = amis[0]
-
-    print "Selected", ami.image_id, ami.name
-    return ami.image_id
 
 
 def verify_ssh_key(ec2, key_file, ec2_keypair_name):
@@ -429,3 +429,59 @@ def verify_ssh_key(ec2, key_file, ec2_keypair_name):
     print info.key_fingerprint
     # TODO verify this fingerprint with the key on disk
     open(os.path.expanduser(key_file), 'rt').read()
+
+
+def get_args():
+    import argparse
+    argp = argparse.ArgumentParser("awsdeploy [prepare|deploy]")
+    argp.add_argument('--action', choices=["prepare", "deploy"], required=True)
+    argp.add_argument('--cfg')
+    argp.add_argument('--prepared-cfg')
+    return argp
+
+
+def validate_creds(opts):
+    session = Session(profile_name=opts.get('profile_name'),
+                      region_name=opts['region'])
+    ec2 = session.resource("ec2")
+    try:
+        ec2.meta.client.describe_id_format()
+    except botocore.exceptions.NoCredentialsError as ex:
+        print "Missing ~/.aws/credentials ? missing profile_name from cfg file"
+        print "http://boto3.readthedocs.org/en/latest/guide/configuration.html"
+        print ex
+        return False
+
+    try:
+        pivnet.Pivnet(token=opts['PIVNET_TOKEN'])
+    except pivnet.AuthException as ex:
+        print "Get API TOKEN from "
+        print "https://network.pivotal.io/users/dashboard/edit-profile"
+        print ex
+        return False
+
+    return True
+
+
+def main(argv):
+    args = get_args().parse_args(argv)
+
+    cfg = args.cfg or args.prepared_cfg
+    if cfg is None:
+        print "One of --cfg or --prepared-cfg is required"
+        return -1
+    opts = yaml.load(open(cfg, 'rt'))
+
+    if validate_creds(opts) is False:
+        return -1
+
+    if args.action == 'prepare':
+        prepare_deploy(args.cfg, args.prepared_cfg)
+    elif args.action == 'deploy':
+        pass
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
