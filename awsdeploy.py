@@ -243,6 +243,8 @@ def deploy(prepared_file, timeout=300):
     ops.install_elastic_runtime(opts, timeout)
     # TODO ensure that ops manager is ready to install ert
 
+    print "Ops manager is now available at ", ops.url
+
 
 AMI_PREFIX = "pivotal-ops-manager-v"
 PCF_AWS_OWNERID = '364390758643'
