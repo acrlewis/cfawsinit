@@ -17,6 +17,7 @@ with Elastic Runtime tile staged.
 1. Fully configure elastic runtime
 2. Autocreate self signed ssl cert and arn
 3. Register Routes
+4. Configure HA parameters in OpsManager
 
 ## Goals
 1. Minimal input configuration file
