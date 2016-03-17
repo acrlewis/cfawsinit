@@ -118,5 +118,7 @@ Installing Elastic runtime (1.7.0.alpha4) cf-1.7.0-build.58.pivotal ... done
 Staged {u'product_version': u'1.7.0-build.58', u'name': u'cf'}
 ```
 
-After a loooong time
-As always, if it times out, restart it.
+After a loooong time, Success!!
+
+As always, if it times out waiting for a certain operation, restart it.
+Alternatively use --timeout parameter to give a very large timeout
