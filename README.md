@@ -19,17 +19,23 @@ with Elastic Runtime tile staged.
 3. Register Routes
 
 ## Goals
-1. minimal input configuration file
-2. Minimal input file is resolved to a specific configuration file
-3. Be fully idempotent. The job can be killed and restarted anytime.
+1. Minimal input configuration file
+2. Input file is resolved to a specific configuration file
+3. Idempotence. The job can be killed and restarted anytime.
 
 ## Usage
 ```shell
-mjog@ mac ~/cfawsinit $ ./awsdeploy.py
+mjog@ mac ~/cfawsinit$ ./awsdeploy.py  --help
 usage: awsdeploy [prepare|deploy] [-h] --action {prepare,deploy} [--cfg CFG]
                                   [--prepared-cfg PREPARED_CFG]
                                   [--timeout TIMEOUT]
-awsdeploy [prepare|deploy]: error: argument --action is required
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --action {prepare,deploy}
+  --cfg CFG
+  --prepared-cfg PREPARED_CFG
+  --timeout TIMEOUT
 ```
 ### Minimal input file  (awsdeploy.yml)
 ```yml
