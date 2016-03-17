@@ -90,12 +90,33 @@ stack-name: mjog-pcf-66ff48
 uid: 66ff48
 ```
 
-### The prepared yaml file is used during deploy ... showing idempotence 
+### The prepared yaml file is used during deploy
+Many operations take a long time. You may press Ctrl-C and restart the same command later
+
 ```shell
-mjog@ mac ~/cfawsinit $ ./awsdeploy.py --action deploy --prepared-cfg awsout.yml
-stack mjog-pcf-66ff48 is in state CREATE_COMPLETE
-Found running ops manager i-c13ec65a ec2-4-5-6-165.compute-1.amazonaws.com
-Admin user is already established
-Ops Manager is already prepared
-Elastic runtime  1.7.0-build.54 is already staged
+mjog@ mac ~/CFWORK/cfinit$ ./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
+Creating stack mjog-pcf-431699 
+It takes about 22 minutes to create the stack
+^CTraceback (most recent call last):
+KeyboardInterrupt
+
+mjog@ mac ~/CFWORK/cfinit$ ./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
+stack mjog-pcf-431699 is in state CREATE_IN_PROGRESS
+^CTraceback (most recent call last):
+KeyboardInterrupt
 ```
+After about 20 mins ...
+```shell
+mjog@ mac ~/CFWORK/cfinit$ ./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
+stack mjog-pcf-431699 is in state CREATE_COMPLETE
+Waiting for instance to start i-2361c5b8 ...
+Admin user established.
+Configuring Ops Manager
+Applying Changes...
+Downloading (1.7.0.alpha4) cf-1.7.0-build.58.pivotal to ops manager... done
+Installing Elastic runtime (1.7.0.alpha4) cf-1.7.0-build.58.pivotal ... done
+Staged {u'product_version': u'1.7.0-build.58', u'name': u'cf'}
+```
+
+After a loooong time
+As always, if it times out, restart it.
