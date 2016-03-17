@@ -75,7 +75,8 @@ def create_stack(opts, ec2, cff, timeout=300):
         Parameters=paramaters,
         Capabilities=['CAPABILITY_IAM'])
 
-    print "It takes about 22 minutes to create the stack"
+    print "Creating stack", opts['stack-name'],
+    print ". Takes about 22 minutes to create the stack"
     return st
 
 
