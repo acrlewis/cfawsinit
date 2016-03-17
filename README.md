@@ -83,3 +83,13 @@ ssl_cert_arn: arn:aws:iam::375783000519:server-certificate/mjogCertificate
 stack-name: mjog-pcf-66ff48
 uid: 66ff48
 ```
+
+### The prepared yaml file is used during deploy
+```shell
+mjog@ mac ~/CFWORK/cfinit$ python ./awsdeploy.py --action deploy --prepared-cfg awsout.yml
+stack mjog-pcf-66ff48 is in state CREATE_COMPLETE
+Found running ops manager i-c13ec65a ec2-4-5-6-165.compute-1.amazonaws.com
+Admin user is already established
+Ops Manager is already prepared
+Elastic runtime  1.7.0-build.54 is already staged
+```
