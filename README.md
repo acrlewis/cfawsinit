@@ -116,6 +116,7 @@ Applying Changes...
 Downloading (1.7.0.alpha4) cf-1.7.0-build.58.pivotal to ops manager... done
 Installing Elastic runtime (1.7.0.alpha4) cf-1.7.0-build.58.pivotal ... done
 Staged {u'product_version': u'1.7.0-build.58', u'name': u'cf'}
+Ops manager is now available at  https://ec2-51-9-24-33.compute-1.amazonaws.com
 ```
 
 After a loooong time, Success!!
