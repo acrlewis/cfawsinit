@@ -9,7 +9,9 @@ Given a configuration file you can create a fully working ops manager
 with Elastic Runtime tile staged.
 
 ## TODO
-Fully configure elastic runtime
+1. Fully configure elastic runtime
+2. Autocreate self signed ssl cert and arn
+3. Register Routes
 
 ## Goals
 1. minimal input configuration file
