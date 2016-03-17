@@ -8,6 +8,11 @@ http://docs.pivotal.io/pivotalcf/customizing/cloudform.html
 Given a configuration file you can create a fully working ops manager
 with Elastic Runtime tile staged.
 
+## Features
+1. Supports Ops Manager 1.6 and 1.7.
+2. Uses network.pivotal.io / pivnet to resolve and fetch needed artifacts.
+3. Idempotence
+
 ## TODO
 1. Fully configure elastic runtime
 2. Autocreate self signed ssl cert and arn
