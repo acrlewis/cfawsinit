@@ -25,7 +25,7 @@ with Elastic Runtime tile staged.
 
 ## Usage
 ```shell
-mjog@ mac ~/CFWORK/cfinit$ python ./awsdeploy.py
+mjog@ mac ~/cfawsinit $ ./awsdeploy.py
 usage: awsdeploy [prepare|deploy] [-h] --action {prepare,deploy} [--cfg CFG]
                                   [--prepared-cfg PREPARED_CFG]
                                   [--timeout TIMEOUT]
@@ -48,7 +48,7 @@ elastic-runtime:
 ssl_cert_arn: arn:aws:iam::375783000519:server-certificate/mjogCertificate
 ```
 ```shell
-mjog@ mac ~/CFWORK/cfinit$ python ./awsdeploy.py --action prepare --cfg awsdeploy.yml --prepared-cfg awsout.yml
+mjog@ mac ~/cfawsinit $ ./awsdeploy.py --action prepare --cfg awsdeploy.yml --prepared-cfg awsout.yml
 ```
 ### This command produces the following fully resolved yaml file
 The resolve (prepared) yaml file is used to deploy cloud foundry
@@ -84,9 +84,9 @@ stack-name: mjog-pcf-66ff48
 uid: 66ff48
 ```
 
-### The prepared yaml file is used during deploy
+### The prepared yaml file is used during deploy ... showing idempotence 
 ```shell
-mjog@ mac ~/CFWORK/cfinit$ python ./awsdeploy.py --action deploy --prepared-cfg awsout.yml
+mjog@ mac ~/cfawsinit $ ./awsdeploy.py --action deploy --prepared-cfg awsout.yml
 stack mjog-pcf-66ff48 is in state CREATE_COMPLETE
 Found running ops manager i-c13ec65a ec2-4-5-6-165.compute-1.amazonaws.com
 Admin user is already established
