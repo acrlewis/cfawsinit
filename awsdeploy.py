@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 from boto3.session import Session
 import botocore.exceptions
 import uuid
