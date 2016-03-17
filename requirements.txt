@@ -4,3 +4,4 @@ robobrowser
 bs4
 mako
 sh
+requests
