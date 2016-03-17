@@ -62,7 +62,7 @@ The resolve (prepared) yaml file is used to deploy cloud foundry
 PIVNET_TOKEN: AAAA-h6BBBBBCotwXFi
 __PREPARED__: true
 date: 2016-03-17 04:08:41.544568
-domain: mjog66ff48.pcf-practice.com
+domain: mjog431699.pcf-practice.com
 elastic-runtime:
   beta-ok: true
   cloudformation-template: ert_cloudformation.json
@@ -86,8 +86,8 @@ region: us-east-1
 ssh_key_name: mjog
 ssh_private_key_path: ~/.ssh/id_rsa
 ssl_cert_arn: arn:aws:iam::375783000519:server-certificate/mjogCertificate
-stack-name: mjog-pcf-66ff48
-uid: 66ff48
+stack-name: mjog-pcf-431699
+uid: 431699
 ```
 
 ### The prepared yaml file is used during deploy
