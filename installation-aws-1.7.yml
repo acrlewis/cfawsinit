@@ -14,23 +14,23 @@ infrastructure:
     - 2.amazon.pool.ntp.org
     blobstore_type: s3
     s3_blobstore_options:
-        endpoint: ${v.s3_endpoint}
-        bucket_name: ${PcfOpsManagerS3Bucket}
-        access_key: ${PcfIamUserAccessKey}
-        secret_key: ${PcfIamUserSecretAccessKey}
+        endpoint: (( v.s3_endpoint ))
+        bucket_name: (( PcfOpsManagerS3Bucket ))
+        access_key: (( PcfIamUserAccessKey ))
+        secret_key: (( PcfIamUserSecretAccessKey ))
     database_type: external
     external_database_options:
-        host: ${PcfRdsAddress}
-        port: ${PcfRdsPort}
-        user: ${PcfRdsUsername}
-        password: ${PcfRdsPassword}
-        database: ${PcfRdsDBName}
+        host: (( PcfRdsAddress ))
+        port: (( PcfRdsPort ))
+        user: (( PcfRdsUsername ))
+        password: (( PcfRdsPassword ))
+        database: (( PcfRdsDBName ))
   networks:
-  - guid: network-${PcfPrivateSubnetId}
+  - guid: network-(( PcfPrivateSubnetId ))
     name: Default
     subnets:
-      - guid: subnet-${PcfPrivateSubnetId}
-        iaas_identifier: ${PcfPrivateSubnetId}
+      - guid: subnet-(( PcfPrivateSubnetId ))
+        iaas_identifier: (( PcfPrivateSubnetId ))
         cidr: 10.0.16.0/20
         dns: 10.0.0.2
         gateway: 10.0.16.1
@@ -38,17 +38,17 @@ infrastructure:
         availability_zone_references:
         - 036869c751e2d7150f92
   iaas_configuration:
-    region: ${v.region}
-    access_key_id: ${PcfIamUserAccessKey}
-    secret_access_key: ${PcfIamUserSecretAccessKey}
-    vpc_id: ${PcfVpc}
-    security_group: ${PcfVmsSecurityGroupId}
-    key_pair_name: ${PcfKeyPairName}
+    region: (( v.region ))
+    access_key_id: (( PcfIamUserAccessKey ))
+    secret_access_key: (( PcfIamUserSecretAccessKey ))
+    vpc_id: (( PcfVpc ))
+    security_group: (( PcfVmsSecurityGroupId ))
+    key_pair_name: (( PcfKeyPairName ))
     ssh_private_key: |-
-        ${v.private_key}
+        (( v.private_key ))
   availability_zones:
   - guid: 036869c751e2d7150f92
-    iaas_identifier:  ${PcfPrivateSubnetAvailabilityZone}
+    iaas_identifier:  (( PcfPrivateSubnetAvailabilityZone ))
 
 products:
 - guid: p-bosh-guid
@@ -103,7 +103,7 @@ products:
       identifier: cpu
     identifier: director
   identifier: p-bosh
-  network_reference: network-${PcfPrivateSubnetId}
+  network_reference: network-(( PcfPrivateSubnetId ))
   singleton_availability_zone_reference: 036869c751e2d7150f92
   availability_zone_references:
   - 036869c751e2d7150f92

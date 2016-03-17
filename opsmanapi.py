@@ -6,11 +6,11 @@ import urlparse
 import requests
 import requests.auth
 import os
-from mako.template import Template
-from mako.runtime import Context
 from StringIO import StringIO
 import copy
 import sys
+import stemplate
+import time
 
 
 # Othwerise urllib3 warns about
@@ -156,6 +156,8 @@ class OpsManApi(object):
         """
         load mappings and hydrate using self, stack_vars
         """
+        # TODO use self.resolve_yml after updating opsman_mappings.yml
+        # template spiff style
         mappings = yaml.load(open(filename, 'rt'))
         for mapping in mappings:
             mp = mapping.values()[0]
@@ -279,6 +281,8 @@ class OpsManApi17(OpsManApi):
 
         if resp.status_code == 200:
             print "Admin user established", resp.json()
+            # takes some
+            time.sleep(5)
         elif resp.status_code == 422:
             jx = resp.json()
             if 'errors' in jx:
@@ -324,19 +328,25 @@ class OpsManApi17(OpsManApi):
             auth=self.auth,
             **kwargs)
 
+    def resolve_yml(self, filename=None):
+        filename = filename or self.action_map_file
+        yobj = yaml.load(open(filename, 'rt'))
+        var = copy.copy(self.var)
+        var['v'] = self
+        stemplate.resolve(
+            yobj, var,
+            replacefn=lambda x: x.replace('(( ', '{').replace(' ))', '}'))
+
+        buf = StringIO()
+        yaml.safe_dump(
+            yobj, buf, indent=2, default_flow_style=False)
+        yamlfile = buf.getvalue()
+        return yamlfile, yobj
+
     def configure(self, filename=None, action=None, force=False):
         if not force and self._is_configured():
             return self
-
-        filename = filename or self.action_map_file
-        template = Template(filename=filename)
-        buf = StringIO()
-        dct = copy.copy(self.var)
-        self.private_key = self.private_key.replace('\n', '\n        ')
-        dct['v'] = self
-        ctx = Context(buf, **dct)
-        template.render_context(ctx)
-        yamlfile = buf.getvalue()
+        yamlfile, _ = self.resolve_yml(filename=filename)
         files = {'installation[file]':
                  ('installation-integration-minimal.yml',
                      yamlfile, 'text/yaml')}
@@ -348,12 +358,13 @@ class OpsManApi17(OpsManApi):
         if resp.status_code != 200:
             raise Exception("Unable to configure "+resp.text)
 
+        print "Configuring Ops Manager...",
+        sys.stdout.flush()
         self.apply_changes()
-
+        print "Done"
         return self
 
     def apply_changes(self):
-        print "Applying Changes"
         resp = requests.post(
             self.url+'/api/v0/installation',
             verify=False,
@@ -432,13 +443,15 @@ class OpsManApi17(OpsManApi):
         host = urlparse.urlparse(self.url).netloc
         from sh import ssh
         try:
-            ssh("-i {} ".format(opts['ssh_private_key_path']),
+            ssh("-oStrictHostKeyChecking=no",
+                "-i {} ".format(opts['ssh_private_key_path']),
                 "ubuntu@"+host,
                 cmd)
         except Exception as ex:
             print "Error running", cmd
             print ex.stdout
             print ex.stderr
+            raise
 
     def install_elastic_runtime(self, opts, timeout=400):
         """
