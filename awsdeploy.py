@@ -12,6 +12,10 @@ import opsmanapi
 import sys
 
 
+# Othwerise urllib3 warns about
+# self signed certs
+requests.packages.urllib3.disable_warnings()
+
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -61,13 +65,16 @@ def create_stack(opts, ec2, cff, timeout=300):
     paramaters = [{"ParameterKey": k, "ParameterValue": v,
                    "UsePreviousValue": True} for k, v in args.items()]
     tags = [{"Key": "email", "Value": opts["email"]}]
-    return cff.create_stack(
+    st = cff.create_stack(
         StackName=opts['stack-name'],
         TemplateBody=open(opts['elastic-runtime']['cloudformation-template'],
                           'rt').read(),
         Tags=tags,
         Parameters=paramaters,
         Capabilities=['CAPABILITY_IAM'])
+
+    print "It takes about 22 minutes to create the stack"
+    return st
 
 
 def launch_ops_manager(opts, stack_vars, ec2):
@@ -79,7 +86,8 @@ def launch_ops_manager(opts, stack_vars, ec2):
                  {'Name': 'tag:stack-name', 'Values': [opts['stack-name']]},
                  {'Name': 'instance-state-name', 'Values': ['running']}]))
     if len(insts) == 1:
-        print "Found running ops manager ", insts[0].id
+        print "Found running ops manager {} {}".format(
+            insts[0].id, insts[0].public_dns_name)
         return insts[0]
     elif len(insts) > 1:
         raise Exception("Several Ops Managers running {} for stack {}".format(
@@ -227,68 +235,10 @@ def deploy(prepared_file, timeout=300):
 
     # ensure that ops manager is ready to receive requests
     wait_for_opsman_ready(ops_manager_inst, timeout)
-    configure_ops_manager(opts, stack_vars, ops_manager_inst)
+    ops = configure_ops_manager(opts, stack_vars, ops_manager_inst)
 
-    ert_file = upload_ert_to_ops_manager(ops_manager_inst, opts)
-    # ensure that ops manager is ready to receive request
-    install_ert_to_ops_manager(ops_manager_inst, opts, ert_file)
-
-
-def execute_on_opsman(ops_manager_inst, opts, cmd):
-    from sh import ssh
-    ssh("-i {} ".format(opts['ssh_private_key_path']),
-        "ubuntu@"+ops_manager_inst.public_dns_name,
-        cmd)
-
-
-def upload_ert_to_ops_manager(ops_manager_inst, opts):
-    """
-    logon to opsman and download the
-    ert file from pivnet
-
-    it runs the command *from* ops manager
-    so it can be locally uploaded
-    """
-    filename = "cf-ert.{}.pivotal".format(opts['elastic-runtime']['version'])
-    CMD = ""
-    if '_NO_CACHE_' not in os.environ:
-        CMD += '[[ -e {filename} ]] || '
-    CMD += (
-        'wget -O {filename} --post-data="" '
-        '--header="Authorization: Token {token}" {url}')
-
-    cmd = CMD.format(
-        filename=filename,
-        token=opts['PIVNET_TOKEN'],
-        url=opts['elastic-runtime']['image-file-url'])
-
-    from sh import ssh
-    print "Downloading ERT {} onto the opsmanager".format(filename)
-    ssh(
-        "ubuntu@"+ops_manager_inst.public_dns_name,
-        cmd,
-        i=opts['ssh_private_key_path'])
-    return filename
-
-
-def install_ert_to_ops_manager(ops_manager_inst, opts, ert_file):
-    CMD = (
-        'curl -v -k https://localhost/api/v0/products '
-        '-F \'product[file]=@{filename}\' '
-        '-X POST '
-        '-H "Authorization: {auth}"')
-
-    cmd = CMD.format(
-        filename=ert_file,
-        auth=opsmanapi.getUAA_Auth_Header(
-            opts['opsman-username'],
-            opts['opsman-password'],
-            "https://" + ops_manager_inst.public_dns_name))
-    from sh import ssh
-    ssh(
-        "ubuntu@"+ops_manager_inst.public_dns_name,
-        cmd,
-        i=opts['ssh_private_key_path'])
+    ops.install_elastic_runtime(opts, timeout)
+    # TODO ensure that ops manager is ready to install ert
 
 
 AMI_PREFIX = "pivotal-ops-manager-v"
@@ -326,10 +276,10 @@ def resolve_versions(token, opsman, ert, ec2):
                'beta-ok': ert['beta-ok']}
 
     files = piv.productfiles('elastic-runtime', elastic_runtime_ver['id'])
-
     cloudformation = next((f for f in files
-                          if 'cloudformation script for aws'
-                          in f['name'].lower()), None)
+                          if f['aws_object_key'].endswith(
+                              "cloudformation.json")),
+                          None)
     if cloudformation is not None:
         filename, dn = piv.download(
             elastic_runtime_ver, cloudformation, quiet=True)
@@ -344,7 +294,7 @@ def resolve_versions(token, opsman, ert, ec2):
             ert['beta-ok'],
             ert['version'],
             selector=lambda x:
-            'cloudformation script for aws' in x['name'].lower())
+            x['aws_object_key'].endswith('cloudformation.json'))
         if vv is not None:
             vr, cloudformation = vv
             filename, dn = piv.download(vr, cloudformation, quiet=True)
@@ -367,6 +317,13 @@ def resolve_versions(token, opsman, ert, ec2):
             + str(elastic_runtime_ver) + " "+files)
     ert_out['image-file-url'] = \
         pivnet.href(er, 'download')
+    fname = os.path.basename(er['aws_object_key'])
+
+    ert_out['image-filename'] = fname
+    # extract build
+    # cf-1.7.0-build.58.pivotal ==> 1.7.0-build.58
+    ert_out['image-build'] = \
+        fname.partition('-')[2].rpartition('.')[0]
 
     return opsman_out, ert_out
 
@@ -439,6 +396,7 @@ def get_args():
     argp.add_argument('--action', choices=["prepare", "deploy"], required=True)
     argp.add_argument('--cfg')
     argp.add_argument('--prepared-cfg')
+    argp.add_argument('--timeout', type=int, default=360)
     return argp
 
 
@@ -480,7 +438,7 @@ def main(argv):
     if args.action == 'prepare':
         prepare_deploy(args.cfg, args.prepared_cfg)
     elif args.action == 'deploy':
-        pass
+        deploy(args.prepared_cfg, timeout=args.timeout)
 
     return 0
 

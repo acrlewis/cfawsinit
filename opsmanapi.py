@@ -2,6 +2,7 @@ from bs4 import BeautifulSoup
 from robobrowser import RoboBrowser
 from robobrowser import forms
 import yaml
+import urlparse
 import requests
 import requests.auth
 import os
@@ -9,6 +10,13 @@ from mako.template import Template
 from mako.runtime import Context
 from StringIO import StringIO
 import copy
+import sys
+
+
+# Othwerise urllib3 warns about
+# self signed certs
+requests.packages.urllib3.disable_warnings()
+
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -87,7 +95,7 @@ class OpsManApi(object):
             jx = resp.json()
             if 'singleton_availability_zone_reference' in jx['products'][0]\
                     and jx['products'][0]['prepared'] is True:
-                print "Product is already prepared"
+                print "Ops Manager is already prepared"
                 return True
 
         return False
@@ -282,14 +290,39 @@ class OpsManApi17(OpsManApi):
 
     def login(self):
         self.auth = CFAuthHandler(self.username, self.password)
-        resp = requests.get(
-            self.url+"/api/v0/api_version",
-            verify=False,
-            auth=self.auth)
+        resp = self.get("/api/v0/api_version")
         if resp.status_code >= 400:
             raise Exception("Error login in {}\n{}".
-                            format(self.username, self.browser.response.text))
+                            format(self.username, resp.text))
         return self
+
+    def post(self, uri, **kwargs):
+        return requests.post(
+            self.url+uri,
+            verify=False,
+            auth=self.auth,
+            **kwargs)
+
+    def getJSON(self, uri, **kwargs):
+        resp = self.get(uri, **kwargs)
+        if resp.status_code < 400:
+            return resp.json()
+        else:
+            raise Exception(resp.text)
+
+    def postJSON(self, uri, **kwargs):
+        resp = self.post(uri, **kwargs)
+        if resp.status_code < 400:
+            return resp.json()
+        else:
+            raise Exception(resp.text)
+
+    def get(self, uri, **kwargs):
+        return requests.get(
+            self.url+uri,
+            verify=False,
+            auth=self.auth,
+            **kwargs)
 
     def configure(self, filename=None, action=None, force=False):
         if not force and self._is_configured():
@@ -328,3 +361,111 @@ class OpsManApi17(OpsManApi):
             auth=self.auth)
         if resp.status_code != 200:
             raise Exception("Unable to start install, "+resp.text)
+
+    def stage_elastic_runtime(self, opts, timeout, products):
+        # TODO if we are running in ec2, don't have to do this
+        # ssh magic
+        if 'cf' not in products:
+            # upload and make available for staging
+            filename = self._download_ert_to_opsman(opts)
+            self._add_ert_to_opsman(opts, filename)
+
+            products = {
+                p['name']: p
+                for p in self.getJSON("/api/v0/products")}
+
+        self.postJSON("/api/v0/staged/products", data=products['cf'])
+
+        staged_products = {
+            p['type']: p
+            for p in self.getJSON("/api/v0/staged/products")}
+        print "Staged", products['cf']
+        return staged_products
+
+    def _download_ert_to_opsman(self, opts):
+        """
+        logon to opsman and download the
+        ert file from pivnet
+
+        it runs the command *from* ops manager
+        so it can be locally uploaded
+        """
+        filename = opts['elastic-runtime']['image-filename']
+        ver = opts['elastic-runtime']['version']
+        print "Downloading ({}) {} to ops manager...".format(ver, filename),
+        sys.stdout.flush()
+        CMD = ""
+        if '_NO_CACHE_' not in os.environ:
+            CMD += '[[ -e {filename} ]] || '
+        CMD += (
+            'wget -O {filename} --post-data="" '
+            '--header="Authorization: Token {token}" {url}')
+
+        cmd = CMD.format(
+            filename=filename,
+            token=opts['PIVNET_TOKEN'],
+            url=opts['elastic-runtime']['image-file-url'])
+
+        self._execute_on_opsman(opts, cmd)
+        print "done"
+        return filename
+
+    def _add_ert_to_opsman(self, opts, ert_file):
+        # TODO ensure that ops manager is ready to install ert
+        CMD = (
+            'curl -v -k https://localhost/api/v0/products '
+            '-F \'product[file]=@{filename}\' '
+            '-X POST '
+            '-H "Authorization: {auth}"')
+
+        cmd = CMD.format(
+            filename=ert_file,
+            auth="Bearer "+self.auth.uaa['access_token'])
+
+        ver = opts['elastic-runtime']['version']
+        print "Installing Elastic runtime ({}) {} ...".format(ver, ert_file),
+        sys.stdout.flush()
+        self._execute_on_opsman(opts, cmd)
+        print "done"
+
+    def _execute_on_opsman(self, opts, cmd):
+        host = urlparse.urlparse(self.url).netloc
+        from sh import ssh
+        try:
+            ssh("-i {} ".format(opts['ssh_private_key_path']),
+                "ubuntu@"+host,
+                cmd)
+        except Exception as ex:
+            print "Error running", cmd
+            print ex.stdout
+            print ex.stderr
+
+    def install_elastic_runtime(self, opts, timeout=400):
+        """
+        idempotent just like everything else
+        """
+        # check if it is already installed.
+        deployed_products = {
+            p['type']: p
+            for p in self.getJSON("/api/v0/deployed/products")}
+        products = {
+            p['name']: p
+            for p in self.getJSON("/api/v0/products")}
+
+        if 'cf' in deployed_products:
+            print "Elastic runtime is deployed", products['cf']
+            return
+
+        staged_products = {
+            p['type']: p
+            for p in self.getJSON("/api/v0/staged/products")}
+
+        if 'cf' in staged_products:
+            print "Elastic runtime ", products['cf']['product_version'],
+            print "is already staged"
+        else:
+            staged_products = self.stage_elastic_runtime(
+                opts, timeout, products)
+
+        # TODO configure and install
+        return self
