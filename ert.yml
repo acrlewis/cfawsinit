@@ -1,0 +1,93 @@
+---
+products:
+- identifier: cf
+  availability_zone_references:
+  - az-(( PcfPrivateSubnetAvailabilityZone ))
+  - az-(( PcfPrivateSubnet2AvailabilityZone ))
+  singleton_availability_zone_reference: az-(( PcfPrivateSubnetAvailabilityZone ))
+  properties:
+  - identifier: logger_endpoint_port
+    value: 4443
+  - identifier: allow_cross_container_traffic
+    value: true
+  - identifier: system_database
+    options:
+    - identifier: external
+      properties:
+      - identifier: port
+        value: (( PcfRdsPort ))
+      - identifier: host
+        value: (( PcfRdsAddress ))
+      - identifier: username
+        value: (( PcfRdsUsername ))
+      - identifier: password
+        value:
+          secret: (( PcfRdsPassword ))
+    value: external
+  - identifier: system_blobstore
+    options:
+    - identifier: external
+      properties:
+      - identifier: endpoint
+        value: (( v.s3_endpoint ))
+      - identifier: buildpacks_bucket
+        value: (( PcfElasticRuntimeS3BuildpacksBucket ))
+      - identifier: droplets_bucket
+        value: (( PcfElasticRuntimeS3DropletsBucket ))
+      - identifier: packages_bucket
+        value: (( PcfElasticRuntimeS3PackagesBucket ))
+      - identifier: resources_bucket
+        value: (( PcfElasticRuntimeS3ResourcesBucket ))
+      - identifier: access_key
+        value: (( PcfIamUserAccessKey ))
+      - identifier: secret_key
+        value:
+          secret: (( PcfIamUserSecretAccessKey ))
+    value: external
+  jobs:
+  - identifier: cloud_controller
+    properties:
+    - identifier: system_domain
+      value: system.(( Opts_domain ))
+    - identifier: apps_domain
+      value: apps.(( Opts_domain ))
+  - identifier: ha_proxy
+    instance:
+      identifier: instances
+      value: 0
+    properties:
+    - identifier: ssl_rsa_certificate
+      value:
+        cert_pem: (( v.self_signed_cert ))
+        private_key_pem: (( v.self_signed_key ))
+    - identifier: skip_cert_verify
+      value: true
+    - identifier: ssl_ciphers
+  - identifier: router
+    elb_names: (( Opts_stack-name ))-pcf-elb
+  - identifier: diego_brain
+    elb_names: (( Opts_stack-name ))-pcf-ssh-elb
+  - identifier: nfs_server
+    instance:
+      identifier: instances
+      value: 0
+  - identifier: mysql_proxy
+    instance:
+      identifier: instances
+      value: 0
+  - identifier: mysql
+    instance:
+      identifier: instances
+      value: 0
+  - identifier: ccdb
+    instance:
+      identifier: instances
+      value: 0
+  - identifier: uaadb
+    instance:
+      identifier: instances
+      value: 0
+  - identifier: consoledb
+    instance:
+      identifier: instances
+      value: 0
