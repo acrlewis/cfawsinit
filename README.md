@@ -26,12 +26,7 @@ with Elastic Runtime tile staged.
 
 ## Requirements
 1. Python 2.7
-```shell
-➜  ~ python
-Python 2.7 (r27:82500, Mar 22 2016, 19:28:43)
-```
 2. PIVNET_TOKEN from https://network.pivotal.io/users/dashboard/edit-profile
-
 3. AWS Keypair loaded to your private key path
 ```shell
 ➜  chmod 400 mjog.pem
