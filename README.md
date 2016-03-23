@@ -1,7 +1,7 @@
 # cfawsinit
 Automate Creation of CloudFoundry deployment in AWS
 
-Automates steps outlined in 
+Automates steps outlined in
 http://docs.pivotal.io/pivotalcf/customizing/cloudform.html
 
 ## Progress So far
@@ -23,6 +23,26 @@ with Elastic Runtime tile staged.
 1. Minimal input configuration file
 2. Input file is resolved to a specific configuration file
 3. Idempotence. The job can be killed and restarted anytime.
+
+## Requirements
+1. Python 2.7
+```shell
+➜  ~ python
+Python 2.7 (r27:82500, Mar 22 2016, 19:28:43)
+```
+2. PIVNET_TOKEN from https://network.pivotal.io/users/dashboard/edit-profile
+
+3. AWS Keypair loaded to your private key path
+```shell
+➜  chmod 400 mjog.pem
+➜  ssh-add mjog.pem
+Identity added: mjog.pem (mjog.pem)
+```
+4. Install Requirements
+```shell
+pip install --upgrade pip
+pip install -r requirements.txt
+```
 
 ## Usage
 ```shell
@@ -96,7 +116,7 @@ Many operations take a long time. You may press Ctrl-C and restart the same comm
 
 ```shell
 mjog@ mac ~/CFWORK/cfinit$ ./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
-Creating stack mjog-pcf-431699 
+Creating stack mjog-pcf-431699
 It takes about 22 minutes to create the stack
 ^CTraceback (most recent call last):
 KeyboardInterrupt
