@@ -28,16 +28,16 @@ with Elastic Runtime tile staged.
 1. Python 2.7
 2. PIVNET_TOKEN from https://network.pivotal.io/users/dashboard/edit-profile
 3. AWS Keypair loaded to your private key path
-```shell
-➜  chmod 400 mjog.pem
-➜  ssh-add mjog.pem
-Identity added: mjog.pem (mjog.pem)
-```
+  ```shell
+  ➜  chmod 400 mjog.pem
+  ➜  ssh-add mjog.pem
+  Identity added: mjog.pem (mjog.pem)
+  ```
 4. Install Requirements
-```shell
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+  ```shell
+  pip install --upgrade pip
+  pip install -r requirements.txt
+  ```
 
 ## Usage
 ```shell
