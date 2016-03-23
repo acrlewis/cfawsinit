@@ -6,11 +6,11 @@ import uuid
 import yaml
 from datetime import datetime
 import os
-import time
 import requests
 import requests.exceptions
 import pivnet
 import opsmanapi
+import wait_util
 import sys
 
 
@@ -119,8 +119,11 @@ def launch_ops_manager(opts, stack_vars, ec2):
     inst.create_tags(
         Tags=[{'Key': 'Name', 'Value': 'Ops Manager'},
               {'Key': 'stack-name', 'Value': opts['stack-name']}])
-    print "Waiting for instance to start", inst.id
+    print "Waiting for Ops Manager to start", inst.id, "...",
+    sys.stdout.flush()
     inst.wait_until_running()
+    inst.reload()
+    print inst.public_dns_name
     return inst
 
 
@@ -131,66 +134,23 @@ def configure_ops_manager(opts, stack_vars, inst):
         opts['opsman-password'],
         os.path.expanduser(opts['ssh_private_key_path']),
         stack_vars,
-        opts['region'])
+        opts['region'],
+        opts=opts)
 
-    ops.setup().login()
+    ops.setup()
+    ops.login()
     ops.configure()
     return ops
 
 
-class TimeoutException(Exception):
-    pass
-
-
-def wait_while(condition, refresh=lambda: True):
-    def waitfor(timeout):
-        waited = 0
-        SLEEPTIME = 5
-
-        refresh()
-        if not condition():
-            return True
-
-        while waited < timeout and condition():
-            time.sleep(SLEEPTIME)
-            waited += SLEEPTIME
-            refresh()
-        if condition():
-            raise TimeoutException()
-
-    return waitfor
-
-
 def wait_for_stack_ready(st, timeout):
-    waiter = wait_while(
+    waiter = wait_util.wait_while(
         lambda: st.stack_status == 'CREATE_IN_PROGRESS',
         lambda: st.reload())
     waiter(timeout)
 
     if st.stack_status == 'CREATE_COMPLETE':
         return True
-
-    raise Exception("Stack {} is in bad state {}".format(
-        st.name, st.stack_status))
-
-
-def wait_for_stack_ready1(st, timeout):
-    waited = 0
-    SLEEPTIME = 5
-    st.reload()
-    if st.stack_status == 'CREATE_IN_PROGRESS':
-        print "Waiting for {} stack to be ready".format(st.name)
-
-    while waited < timeout and st.stack_status == 'CREATE_IN_PROGRESS':
-        time.sleep(SLEEPTIME)
-        waited += SLEEPTIME
-        st.reload()
-
-    if st.stack_status == 'CREATE_COMPLETE':
-        return True
-
-    if st.stack_status == 'CREATE_IN_PROGRESS':
-        raise TimeoutException(st.name + ' In CREATE_IN_PROGRESS')
 
     raise Exception("Stack {} is in bad state {}".format(
         st.name, st.stack_status))
@@ -209,10 +169,13 @@ def wait_for_opsman_ready(inst, timeout):
             print ex
         return True
 
-    waiter = wait_while(shoud_wait)
+    waiter = wait_util.wait_while(shoud_wait)
     return waiter(timeout)
 
 
+#
+# Main deploy driver function
+#
 def deploy(prepared_file, timeout=300):
     """
     Topline driver
@@ -232,15 +195,22 @@ def deploy(prepared_file, timeout=300):
     stack = create_stack(opts, ec2, cff)
     # ensure that stack is ready
     wait_for_stack_ready(stack, timeout)
-
-    stack_vars = get_stack_outputvars(stack, ec2)
+    # 'arn:aws:cloudformation:us-east-1:375783000519:stack/mjog-pcf-42f062-OpsManStack-13R2QRZJCIPTB/ec4e3010-ef99-11e5-9206-500c28604c82'
+    opsman_stack_arn = next(
+        ll for ll in stack.resource_summaries.iterator()
+        if ll.logical_id == 'OpsManStack').physical_resource_id
+    opsman_stack = get_stack(opsman_stack_arn.split('/')[1], cff)
+    stack_vars = get_stack_outputvars(opsman_stack, ec2)
+    stack_vars.update(get_stack_outputvars(stack, ec2))
     ops_manager_inst = launch_ops_manager(opts, stack_vars, ec2)
 
     # ensure that ops manager is ready to receive requests
     wait_for_opsman_ready(ops_manager_inst, timeout)
     ops = configure_ops_manager(opts, stack_vars, ops_manager_inst)
 
+    ops.create_ert_databases(opts)
     ops.install_elastic_runtime(opts, timeout)
+    ops.configure_elastic_runtime(opts, timeout)
     # TODO ensure that ops manager is ready to install ert
 
     print "Ops manager is now available at ", ops.url

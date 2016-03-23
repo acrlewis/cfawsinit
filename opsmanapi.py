@@ -10,7 +10,7 @@ from StringIO import StringIO
 import copy
 import sys
 import stemplate
-import time
+import wait_util
 
 
 # Othwerise urllib3 warns about
@@ -28,7 +28,7 @@ def get(*args, **kwargs):
         verify=False,
         allow_redirects=False)
     # somewhat of a hack
-    # pre api ops manager do not have /api/v0 endpoints
+    # pre api ops manager does not have /api/v0 endpoints
     if resp.status_code == 404:
         return OpsManApi(*args, **kwargs)
     else:
@@ -37,12 +37,16 @@ def get(*args, **kwargs):
 
 class OpsManApi(object):
     def __init__(self, url, username, password, private_key_file,
-                 stack_vars, region='us-east-1'):
+                 stack_vars, region, opts):
         self.url = url
         self.username = username
         self.password = password
         self.auth = requests.auth.HTTPBasicAuth(username, password)
         self.private_key = open(private_key_file, "rt").read()
+        self.self_signed_key = open(
+            THIS_DIR+"/Selfsigned/my-private-key.pem", "rt").read()
+        self.self_signed_cert = open(
+            THIS_DIR+"/Selfsigned/my-certificate.pem", "rt").read()
         self.browser = RoboBrowser(history=True)
         self.var = stack_vars
         self.region = region
@@ -51,6 +55,7 @@ class OpsManApi(object):
         else:
             self.s3_endpoint = "https://s3-{}.amazonaws.com".format(region)
         self.action_map_file = THIS_DIR+'/opsman_mappings.yml'
+        self.opts = opts
 
     def setup(self):
         setup_data = {'setup[eula_accepted]': 'true',
@@ -212,6 +217,10 @@ class OpsManApi(object):
             self.browser.submit_form(forms.form.Form(inst_form))
 
 
+class AuthException(Exception):
+    pass
+
+
 class CFAuthHandler(requests.auth.AuthBase):
     def __init__(self, username, password):
         self.username = username
@@ -236,7 +245,9 @@ class CFAuthHandler(requests.auth.AuthBase):
             auth=('opsman', ''))
 
         if resp.status_code != 200:
-            raise Exception("Unable to authenticate "+resp.text)
+            exp = AuthException("Unable to authenticate ")
+            exp.resp = resp
+            raise exp
 
         return resp.json()
 
@@ -263,7 +274,7 @@ class OpsManApi17(OpsManApi):
         # self.action_map_file = THIS_DIR+'/opsman_mappings17.yml'
         self.action_map_file = THIS_DIR+'/installation-aws-1.7.yml'
 
-    def setup(self):
+    def setup(self, timeout=300):
         setup_data = {
             'setup[eula_accepted]': 'true',
             'setup[identity_provider]': 'internal',
@@ -280,9 +291,23 @@ class OpsManApi17(OpsManApi):
             allow_redirects=False)
 
         if resp.status_code == 200:
-            print "Admin user established", resp.json()
-            # takes some
-            time.sleep(5)
+            print "Admin user established"
+
+            def should_wait():
+                try:
+                    self.login()
+                    return False
+                except Exception as ex:
+                    if hasattr(ex, 'resp') and\
+                            ex.resp.status_code >= 400:
+                        return True
+
+                    raise
+
+            print "Waiting for ops manager login"
+            waiter = wait_util.wait_while(should_wait)
+            waiter(timeout)
+
         elif resp.status_code == 422:
             jx = resp.json()
             if 'errors' in jx:
@@ -296,8 +321,10 @@ class OpsManApi17(OpsManApi):
         self.auth = CFAuthHandler(self.username, self.password)
         resp = self.get("/api/v0/api_version")
         if resp.status_code >= 400:
-            raise Exception("Error login in {}\n{}".
+            exp = Exception("Error login in {}\n{}".
                             format(self.username, resp.text))
+            exp.resp = resp
+            raise exp
         return self
 
     def post(self, uri, **kwargs):
@@ -332,6 +359,7 @@ class OpsManApi17(OpsManApi):
         filename = filename or self.action_map_file
         yobj = yaml.load(open(filename, 'rt'))
         var = copy.copy(self.var)
+        var.update({"Opts_"+k: v for k, v in self.opts.items()})
         var['v'] = self
         stemplate.resolve(
             yobj, var,
@@ -381,9 +409,15 @@ class OpsManApi17(OpsManApi):
             filename = self._download_ert_to_opsman(opts)
             self._add_ert_to_opsman(opts, filename)
 
-            products = {
-                p['name']: p
-                for p in self.getJSON("/api/v0/products")}
+            def should_wait():
+                products.update({
+                    p['name']: p
+                    for p in self.getJSON("/api/v0/products")})
+                return 'cf' not in products
+
+            print "Waiting for elastic runtime to be available for staging"
+            waiter = wait_util.wait_while(should_wait)
+            waiter(timeout)
 
         self.postJSON("/api/v0/staged/products", data=products['cf'])
 
@@ -417,7 +451,7 @@ class OpsManApi17(OpsManApi):
             token=opts['PIVNET_TOKEN'],
             url=opts['elastic-runtime']['image-file-url'])
 
-        self._execute_on_opsman(opts, cmd)
+        self.execute_on_opsman(opts, cmd)
         print "done"
         return filename
 
@@ -436,10 +470,10 @@ class OpsManApi17(OpsManApi):
         ver = opts['elastic-runtime']['version']
         print "Installing Elastic runtime ({}) {} ...".format(ver, ert_file),
         sys.stdout.flush()
-        self._execute_on_opsman(opts, cmd)
+        self.execute_on_opsman(opts, cmd)
         print "done"
 
-    def _execute_on_opsman(self, opts, cmd):
+    def execute_on_opsman(self, opts, cmd):
         host = urlparse.urlparse(self.url).netloc
         from sh import ssh
         try:
@@ -452,6 +486,34 @@ class OpsManApi17(OpsManApi):
             print ex.stdout
             print ex.stderr
             raise
+
+    def copy_to_opsman(self, opts, source, target=""):
+        host = urlparse.urlparse(self.url).netloc
+        from sh import scp
+        try:
+            scp("-oStrictHostKeyChecking=no",
+                "-i {} ".format(opts['ssh_private_key_path']),
+                source,
+                "ubuntu@"+host+":"+target)
+        except Exception as ex:
+            print "Error copying", source, target
+            print ex.stdout
+            print ex.stderr
+            raise
+
+    def create_ert_databases(self, opts):
+        file_name = 'create_dbs.ddl'
+        self.copy_to_opsman(opts, THIS_DIR+"/"+file_name, file_name)
+        CMD = (
+            'mysql --host={PcfRdsAddress} '
+            '--user={PcfRdsUsername} '
+            '--password={PcfRdsPassword} '
+            '< {file_name}')
+        cmd = CMD.format(
+            file_name=file_name,
+            **self.var)
+
+        self.execute_on_opsman(opts, cmd)
 
     def install_elastic_runtime(self, opts, timeout=400):
         """
@@ -479,6 +541,30 @@ class OpsManApi17(OpsManApi):
         else:
             staged_products = self.stage_elastic_runtime(
                 opts, timeout, products)
-
-        # TODO configure and install
         return self
+
+    def configure_elastic_runtime(self, opts, timeout=300):
+        current = self.getJSON("/api/installation_settings")
+        yaml.safe_dump(
+            current,
+            open('installation_settings_pre.yml', 'wt'),
+            indent=2, default_flow_style=False)
+        _, yobj = self.resolve_yml(filename=THIS_DIR+"/ert.yml")
+        stemplate.cfgmerge(
+            stemplate.Cfg(current),
+            stemplate.Cfg(yobj))
+        yaml.safe_dump(
+            current,
+            open('installation_settings_post.yml', 'wt'),
+            indent=2, default_flow_style=False)
+        buf = StringIO()
+        yaml.safe_dump(
+            current, buf, indent=2, default_flow_style=False)
+        yamlfile = buf.getvalue()
+        files = {'installation[file]':
+                 ('installation-integration-minimal.yml',
+                     yamlfile, 'text/yaml')}
+
+        self.postJSON(
+            "/api/installation_settings",
+            files=files)
