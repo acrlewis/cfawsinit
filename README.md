@@ -18,6 +18,7 @@ with Elastic Runtime tile staged.
 2. Autocreate self signed ssl cert and arn
 3. Register Routes
 4. Configure HA parameters in OpsManager
+5. Display error from CloudFormation events if a ROLLBACK occurs 
 
 ## Goals
 1. Minimal input configuration file
@@ -26,22 +27,13 @@ with Elastic Runtime tile staged.
 
 ## Requirements
 1. Python 2.7
-2. PIVNET_TOKEN from https://network.pivotal.io/users/dashboard/edit-profile
-3. AWS Keypair loaded to your private key path
-  ```
-  chmod 400 mjog.pem
-  ssh-add mjog.pem
-  Identity added: mjog.pem (mjog.pem)
-  ```
-4. Install Requirements
-  ```
-  pip install --upgrade pip
-  pip install -r requirements.txt
-  ```
+2. PIVNET_TOKEN from api token at https://network.pivotal.io/users/dashboard/edit-profile
+3. AWS Keypair loaded to your private key path `chmod 400 mjog.pem` and `ssh-add mjog.pem`
+4. Install Requirements `pip install --upgrade pip` and `pip install -r requirements.txt`
 
 ## Usage
 ```shell
-mjog@ mac ~/cfawsinit$ ./awsdeploy.py  --help
+./awsdeploy.py  --help
 usage: awsdeploy [prepare|deploy] [-h] --action {prepare,deploy} [--cfg CFG]
                                   [--prepared-cfg PREPARED_CFG]
                                   [--timeout TIMEOUT]
@@ -53,7 +45,7 @@ optional arguments:
   --prepared-cfg PREPARED_CFG
   --timeout TIMEOUT
 ```
-### Minimal input file  (awsdeploy.yml)
+### Build Input yaml  (awsdeploy.yml)
 ```yml
 region: us-east-1
 email: email@gmail.com
@@ -69,11 +61,11 @@ elastic-runtime:
     beta-ok: true
 ssl_cert_arn: arn:aws:iam::375783000519:server-certificate/mjogCertificate
 ```
+### Produce Output yaml configuration
 ```shell
-mjog@ mac ~/cfawsinit $ ./awsdeploy.py --action prepare --cfg awsdeploy.yml --prepared-cfg awsout.yml
+./awsdeploy.py --action prepare --cfg awsdeploy.yml --prepared-cfg awsout.yml
 ```
-### This command produces the following fully resolved yaml file
-The resolve (prepared) yaml file is used to deploy cloud foundry
+### The prepared output yaml is used to deploy Pivotal Cloud Foundry
 ```yml
 PIVNET_TOKEN: AAAA-h6BBBBBCotwXFi
 __PREPARED__: true
@@ -110,13 +102,13 @@ uid: 431699
 Many operations take a long time. You may press Ctrl-C and restart the same command later
 
 ```shell
-mjog@ mac ~/CFWORK/cfinit$ ./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
+./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
 Creating stack mjog-pcf-431699
 It takes about 22 minutes to create the stack
 ^CTraceback (most recent call last):
 KeyboardInterrupt
 
-mjog@ mac ~/CFWORK/cfinit$ ./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
+./awsdeploy.py --action deploy --prepared-cfg ./awsout.yml
 stack mjog-pcf-431699 is in state CREATE_IN_PROGRESS
 ^CTraceback (most recent call last):
 KeyboardInterrupt
@@ -132,9 +124,8 @@ Applying Changes...
 Downloading (1.7.0.alpha4) cf-1.7.0-build.58.pivotal to ops manager... done
 Installing Elastic runtime (1.7.0.alpha4) cf-1.7.0-build.58.pivotal ... done
 Staged {u'product_version': u'1.7.0-build.58', u'name': u'cf'}
-Ops manager is now available at  https://ec2-51-9-24-33.compute-1.amazonaws.com
+Ops manager is now available at  https://ip.compute-1.amazonaws.com
 ```
-
 After a loooong time, Success!!
 
 As always, if it times out waiting for a certain operation, restart it.
